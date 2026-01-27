@@ -1,22 +1,28 @@
 import * as vscode from 'vscode';
-import { DebugPoller } from './polling';
-import { evaluateExpression, showEvaluationResult, promptForExpression } from './evaluate';
-import { getCurrentFrameId } from './debugger';
-import { showObjectJson, showObjectPickerForLine } from './hints';
-import { DebugInlayHintsProvider } from './inlayhints';
+import { DebugPoller, getCurrentFrameId } from './services';
+import {
+  evaluateExpression,
+  showEvaluationResult,
+  promptForExpression,
+  showObjectJson,
+  showObjectPickerForLine,
+} from './ui';
+import { DebugInlayHintsProvider } from './providers';
 
-export function activate(context: vscode.ExtensionContext) {
-  // Register inlay hints provider
+/**
+ * Activate the C# Debug Hints extension
+ */
+export function activate(context: vscode.ExtensionContext): void {
   const inlayHintsProvider = new DebugInlayHintsProvider();
+  const poller = new DebugPoller(inlayHintsProvider);
+
+  // Register inlay hints provider for C# files
   const inlayHintsDisposable = vscode.languages.registerInlayHintsProvider(
     { language: 'csharp', scheme: 'file' },
     inlayHintsProvider,
   );
 
-  // Initialize debug poller
-  const poller = new DebugPoller(inlayHintsProvider);
-
-  // Register show object JSON command
+  // Command: Show object as JSON
   const showJsonCommand = vscode.commands.registerCommand(
     'csharpDebugHints.showObjectJson',
     async (varName: string) => {
@@ -24,7 +30,7 @@ export function activate(context: vscode.ExtensionContext) {
     },
   );
 
-  // Register view object picker command
+  // Command: View object picker
   const viewObjectCommand = vscode.commands.registerCommand(
     'csharpDebugHints.viewObjectJson',
     async () => {
@@ -32,7 +38,7 @@ export function activate(context: vscode.ExtensionContext) {
     },
   );
 
-  // Register evaluate command
+  // Command: Evaluate expression
   const evaluateCommand = vscode.commands.registerCommand(
     'csharpDebugHints.evaluateExpression',
     async () => {
@@ -48,11 +54,10 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      // Try to get selected text from editor
+      // Get expression from selection or prompt user
       const editor = vscode.window.activeTextEditor;
       let expression = editor?.document.getText(editor.selection);
 
-      // If no selection, prompt user
       if (!expression) {
         expression = await promptForExpression();
         if (!expression) {
@@ -60,7 +65,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
       }
 
-      // Evaluate the expression
+      // Evaluate and show result
       const result = await evaluateExpression(session, frameId, expression);
       if (result) {
         await showEvaluationResult(expression, result, session);
@@ -70,7 +75,7 @@ export function activate(context: vscode.ExtensionContext) {
     },
   );
 
-  // Register debug session event listeners
+  // Debug session event listeners
   const listeners = [
     vscode.debug.onDidChangeActiveDebugSession(session => {
       poller.setSession(session);
@@ -84,7 +89,7 @@ export function activate(context: vscode.ExtensionContext) {
       poller.setSession(session);
       poller.startPolling();
     }),
-    vscode.debug.onDidTerminateDebugSession(session => {
+    vscode.debug.onDidTerminateDebugSession(() => {
       poller.setSession(undefined);
       poller.stopPolling();
     }),
@@ -99,4 +104,4 @@ export function activate(context: vscode.ExtensionContext) {
   );
 }
 
-export function deactivate() {}
+export function deactivate(): void {}

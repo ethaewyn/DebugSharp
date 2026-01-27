@@ -1,99 +1,19 @@
 import * as vscode from 'vscode';
-import { serializeObjectToJson } from './debugger';
 
 /**
- * Evaluate an expression in the current debug context
+ * Shared webview HTML generator for JSON display with syntax highlighting and folding
  */
-export async function evaluateExpression(
-  session: vscode.DebugSession,
-  frameId: number,
-  expression: string,
-): Promise<{ result: string; type?: string; variablesReference?: number } | null> {
-  try {
-    const result = await session.customRequest('evaluate', {
-      expression: expression,
-      frameId: frameId,
-      context: 'watch',
-    });
+export function generateJsonWebview(title: string, jsonString: string, subtitle?: string): string {
+  const subtitleHtml = subtitle
+    ? `<p style="color: var(--vscode-descriptionForeground);">${subtitle}</p>`
+    : '';
 
-    if (result && result.result) {
-      return {
-        result: result.result,
-        type: result.type,
-        variablesReference: result.variablesReference,
-      };
-    }
-    if (result && result.error) {
-      return {
-        result: `Error: ${result.error}`,
-      };
-    }
-    return null;
-  } catch (error: any) {
-    return {
-      result: `Error: ${error?.message || 'Failed to evaluate expression'}`,
-    };
-  }
-}
-
-/**
- * Show evaluation result in a webview panel
- */
-export async function showEvaluationResult(
-  expression: string,
-  evalResult: { result: string; type?: string; variablesReference?: number },
-  session: vscode.DebugSession,
-) {
-  // Check if result is an object that can be expanded
-  const isObject = evalResult.variablesReference && evalResult.variablesReference > 0;
-
-  let displayContent: string;
-  let isJson = false;
-
-  if (isObject) {
-    try {
-      const jsonObj = await serializeObjectToJson(session, evalResult.variablesReference!);
-      displayContent = JSON.stringify(jsonObj, null, 2);
-      isJson = true;
-    } catch (error) {
-      displayContent = evalResult.result;
-      isJson = false;
-    }
-  } else {
-    displayContent = evalResult.result;
-    isJson = false;
-  }
-
-  // Create webview panel
-  const panel = vscode.window.createWebviewPanel(
-    'evaluationResult',
-    `Eval: ${expression}`,
-    vscode.ViewColumn.Beside,
-    {
-      enableScripts: true,
-    },
-  );
-
-  panel.webview.html = getEvaluationWebviewContent(
-    expression,
-    displayContent,
-    evalResult.type,
-    isJson,
-  );
-}
-
-function getEvaluationWebviewContent(
-  expression: string,
-  content: string,
-  type: string | undefined,
-  isJson: boolean,
-): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Evaluation Result</title>
+    <title>${escapeHtml(title)}</title>
     <style>
         body {
             font-family: 'Consolas', 'Monaco', monospace;
@@ -105,14 +25,10 @@ function getEvaluationWebviewContent(
             color: var(--vscode-editor-foreground);
             border-bottom: 1px solid var(--vscode-panel-border);
             padding-bottom: 10px;
-        }
-        .type-info {
-            color: var(--vscode-descriptionForeground);
-            font-size: 0.9em;
-            margin-bottom: 10px;
+            margin-bottom: 5px;
         }
         .toolbar {
-            margin-bottom: 10px;
+            margin: 15px 0;
         }
         button {
             background-color: var(--vscode-button-background);
@@ -126,7 +42,7 @@ function getEvaluationWebviewContent(
         button:hover {
             background-color: var(--vscode-button-hoverBackground);
         }
-        #result-container {
+        #content {
             background-color: var(--vscode-textCodeBlock-background);
             padding: 15px;
             border-radius: 5px;
@@ -152,6 +68,9 @@ function getEvaluationWebviewContent(
         .json-bracket {
             color: var(--vscode-editor-foreground);
         }
+        .json-line {
+            position: relative;
+        }
         .json-collapsible {
             display: inline;
         }
@@ -169,12 +88,12 @@ function getEvaluationWebviewContent(
         .json-collapsible.collapsed .json-toggle::before {
             content: '▶';
         }
-        .json-collapsible.collapsed .json-children {
-            display: none;
-        }
         .json-children {
             margin-left: 20px;
             display: block;
+        }
+        .json-collapsible.collapsed .json-children {
+            display: none;
         }
         .json-collapsible.collapsed .json-bracket-close {
             display: none;
@@ -187,27 +106,20 @@ function getEvaluationWebviewContent(
         .json-collapsible.collapsed .json-collapsed-preview {
             display: inline;
         }
-        .json-line {
-            position: relative;
-        }
     </style>
 </head>
 <body>
-    <h2>Expression: ${escapeHtml(expression)}</h2>
-    ${type ? `<div class="type-info">Type: ${escapeHtml(type)}</div>` : ''}
+    <h2>${escapeHtml(title)}</h2>
+    ${subtitleHtml}
     <div class="toolbar">
-        <button onclick="copyToClipboard()">📋 Copy Result</button>
-        ${isJson ? '<button onclick="expandAll()">⬇️ Expand All</button><button onclick="collapseAll()">➡️ Collapse All</button>' : ''}
+        <button onclick="copyToClipboard()">Copy to Clipboard</button>
+        <button onclick="expandAll()">Expand All</button>
+        <button onclick="collapseAll()">Collapse All</button>
     </div>
-    <div id="result-container"></div>
+    <div id="content"></div>
     <script>
-        const isJson = ${isJson};
-        const rawContent = ${JSON.stringify(content)};
-        
-        ${
-          isJson
-            ? `
-        const jsonData = JSON.parse(rawContent);
+        const jsonData = ${jsonString};
+        const rawContent = ${JSON.stringify(jsonString)};
         
         function syntaxHighlight(obj, depth = 0) {
             if (obj === null) {
@@ -265,6 +177,12 @@ function getEvaluationWebviewContent(
             return html;
         }
         
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
         function toggleCollapse(event) {
             event.stopPropagation();
             const collapsible = event.target.closest('.json-collapsible');
@@ -285,19 +203,6 @@ function getEvaluationWebviewContent(
             });
         }
         
-        document.getElementById('result-container').innerHTML = syntaxHighlight(jsonData);
-        `
-            : `
-        document.getElementById('result-container').textContent = rawContent;
-        `
-        }
-        
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-        
         function copyToClipboard() {
             navigator.clipboard.writeText(rawContent).then(() => {
                 const btn = document.querySelector('button');
@@ -306,28 +211,41 @@ function getEvaluationWebviewContent(
                 setTimeout(() => btn.textContent = originalText, 2000);
             });
         }
+        
+        document.getElementById('content').innerHTML = syntaxHighlight(jsonData);
     </script>
 </body>
 </html>`;
 }
 
-function escapeHtml(text: string): string {
-  const map: { [key: string]: string } = {
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  };
-  return text.replace(/[&<>"']/g, m => map[m]);
+/**
+ * Escape HTML special characters
+ */
+export function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, match => {
+    const escapeMap: { [key: string]: string } = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    };
+    return escapeMap[match];
+  });
 }
 
 /**
- * Show input dialog to evaluate an expression
+ * Create a webview panel with JSON content
  */
-export async function promptForExpression(): Promise<string | undefined> {
-  return vscode.window.showInputBox({
-    prompt: 'Enter an expression to evaluate',
-    placeHolder: 'e.g., x + y, obj.Property, string.Concat(a, b)',
+export function createJsonWebviewPanel(
+  title: string,
+  jsonString: string,
+  subtitle?: string,
+): vscode.WebviewPanel {
+  const panel = vscode.window.createWebviewPanel('jsonViewer', title, vscode.ViewColumn.Beside, {
+    enableScripts: true,
   });
+
+  panel.webview.html = generateJsonWebview(title, jsonString, subtitle);
+  return panel;
 }

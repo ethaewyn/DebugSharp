@@ -1,33 +1,31 @@
 import * as vscode from 'vscode';
-import { getCurrentFrameId, getVariablesForFrame } from './debugger';
-import { POLL_INTERVAL_MS } from './constants';
-import { updateInlayHintData } from './inlayhints';
+import { getCurrentFrameId, getVariablesForFrame } from './debugService';
+import { POLL_INTERVAL_MS } from '../config/constants';
+import { updateInlayHintData, DebugInlayHintsProvider } from '../providers/inlayHintsProvider';
 
+/**
+ * Manages polling for debug variables and updating inlay hints
+ */
 export class DebugPoller {
   private pollInterval: ReturnType<typeof setInterval> | null = null;
   private currentSession: vscode.DebugSession | undefined;
-  private inlayHintsProvider: any;
+  private readonly inlayHintsProvider: DebugInlayHintsProvider;
 
-  constructor(inlayHintsProvider: any) {
+  constructor(inlayHintsProvider: DebugInlayHintsProvider) {
     this.inlayHintsProvider = inlayHintsProvider;
   }
 
   /**
    * Single poll cycle - check if debugger is paused and update hints
    */
-  private async poll() {
-    if (!this.currentSession) {
-      return;
-    }
-
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) {
+  private async poll(): Promise<void> {
+    if (!this.currentSession || !vscode.window.activeTextEditor) {
       return;
     }
 
     const frameId = await getCurrentFrameId(this.currentSession);
     if (frameId === null) {
-      return; // Still running or no frames
+      return;
     }
 
     const variables = await getVariablesForFrame(this.currentSession, frameId);
@@ -35,7 +33,6 @@ export class DebugPoller {
       return;
     }
 
-    // Update inlay hints data
     updateInlayHintData(variables, this.currentSession);
     this.inlayHintsProvider.refresh();
   }
@@ -43,7 +40,7 @@ export class DebugPoller {
   /**
    * Start polling for debug variables
    */
-  startPolling() {
+  startPolling(): void {
     if (this.pollInterval) {
       clearInterval(this.pollInterval);
     }
@@ -53,12 +50,11 @@ export class DebugPoller {
   /**
    * Stop polling and clear hints
    */
-  stopPolling() {
+  stopPolling(): void {
     if (this.pollInterval) {
       clearInterval(this.pollInterval);
       this.pollInterval = null;
     }
-    // Clear inlay hints data
     updateInlayHintData({}, undefined);
     this.inlayHintsProvider.refresh();
   }
@@ -66,7 +62,7 @@ export class DebugPoller {
   /**
    * Update the active debug session
    */
-  setSession(session: vscode.DebugSession | undefined) {
+  setSession(session: vscode.DebugSession | undefined): void {
     this.currentSession = session;
   }
 
