@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Expression Evaluator</title>
+    <style>
+      body {
+        font-family: 'Consolas', 'Monaco', monospace;
+        padding: 15px;
+        margin: 0;
+        color: var(--vscode-editor-foreground);
+        background-color: var(--vscode-editor-background);
+      }
+
+      .header {
+        border-bottom: 1px solid var(--vscode-panel-border);
+        padding-bottom: 15px;
+        margin-bottom: 15px;
+      }
+
+      h3 {
+        margin: 0 0 10px 0;
+        color: var(--vscode-editor-foreground);
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .info {
+        color: var(--vscode-descriptionForeground);
+        font-size: 12px;
+        margin-bottom: 10px;
+      }
+
+      .button-row {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 15px;
+      }
+
+      button {
+        background-color: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
+        border: none;
+        padding: 6px 14px;
+        cursor: pointer;
+        border-radius: 2px;
+        font-size: 13px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+
+      button:hover {
+        background-color: var(--vscode-button-hoverBackground);
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .output-section {
+        flex: 1;
+        overflow-y: auto;
+        padding: 15px;
+      }
+
+      .result-item {
+        margin-bottom: 20px;
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 4px;
+        overflow: hidden;
+      }
+
+      .result-header {
+        background-color: var(--vscode-textCodeBlock-background);
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--vscode-panel-border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .result-expression {
+        font-weight: 600;
+        color: var(--vscode-textLink-foreground);
+      }
+
+      .result-type {
+        font-size: 11px;
+        color: var(--vscode-descriptionForeground);
+      }
+
+      .result-content {
+        padding: 12px;
+        background-color: var(--vscode-editor-background);
+      }
+
+      .error-message {
+        color: var(--vscode-errorForeground);
+        padding: 12px;
+        background-color: var(--vscode-inputValidation-errorBackground);
+        border: 1px solid var(--vscode-inputValidation-errorBorder);
+        border-radius: 3px;
+        margin-bottom: 15px;
+      }
+
+      .json-key {
+        color: #9cdcfe;
+      }
+      .json-string {
+        color: #ce9178;
+      }
+      .json-number {
+        color: #b5cea8;
+      }
+      .json-boolean {
+        color: #569cd6;
+      }
+      .json-null {
+        color: #569cd6;
+      }
+      .json-bracket {
+        color: var(--vscode-editor-foreground);
+      }
+      .json-collapsible {
+        display: inline;
+      }
+      .json-toggle {
+        cursor: pointer;
+        user-select: none;
+        display: inline-block;
+        width: 16px;
+        color: var(--vscode-icon-foreground);
+      }
+      .json-toggle::before {
+        content: '▼';
+        font-size: 10px;
+      }
+      .json-collapsible.collapsed .json-toggle::before {
+        content: '▶';
+      }
+      .json-children {
+        margin-left: 20px;
+        display: block;
+      }
+      .json-collapsible.collapsed .json-children {
+        display: none;
+      }
+      .json-collapsible.collapsed .json-bracket-close {
+        display: none;
+      }
+      .json-collapsed-preview {
+        display: none;
+        color: var(--vscode-descriptionForeground);
+        font-style: italic;
+      }
+      .json-collapsible.collapsed .json-collapsed-preview {
+        display: inline;
+      }
+
+      .empty-state {
+        text-align: center;
+        color: var(--vscode-descriptionForeground);
+        padding: 40px 20px;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h3>Debug Expression Evaluator</h3>
+      <div class="info">
+        Write your C# expression in the editor on the left (with full IntelliSense), then click
+        Evaluate or press Ctrl+Enter
+      </div>
+      <div class="button-row">
+        <button id="evaluate-btn" onclick="evaluateExpression()">▶ Evaluate</button>
+        <button onclick="clearResults()">Clear Results</button>
+      </div>
+    </div>
+
+    <div id="results"></div>
+    <div id="empty-state" class="empty-state">
+      Write a C# expression in the editor and click Evaluate (or press Ctrl+Enter) to see results
+    </div>
+
+    <script>
+      const vscode = acquireVsCodeApi();
+      const resultsContainer = document.getElementById('results');
+      const emptyState = document.getElementById('empty-state');
+      const evaluateBtn = document.getElementById('evaluate-btn');
+
+      function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
+      function evaluateExpression() {
+        evaluateBtn.disabled = true;
+        evaluateBtn.textContent = '⏳ Evaluating...';
+
+        vscode.postMessage({
+          type: 'evaluate',
+        });
+      }
+
+      // Listen for external evaluate triggers (e.g., from keyboard shortcut)
+      window.addEventListener('message', event => {
+        const message = event.data;
+        if (message.type === 'triggerEvaluate') {
+          evaluateExpression();
+        }
+      });
+
+      function clearResults() {
+        resultsContainer.innerHTML = '';
+        emptyState.style.display = 'block';
+      }
+
+      function syntaxHighlight(obj, depth = 0) {
+        if (obj === null) {
+          return '<span class="json-null">null</span>';
+        }
+
+        if (typeof obj === 'string') {
+          return '<span class="json-string">"' + escapeHtml(obj) + '"</span>';
+        }
+
+        if (typeof obj === 'number') {
+          return '<span class="json-number">' + obj + '</span>';
+        }
+
+        if (typeof obj === 'boolean') {
+          return '<span class="json-boolean">' + obj + '</span>';
+        }
+
+        const isArray = Array.isArray(obj);
+        const hasEntries = isArray ? obj.length > 0 : Object.keys(obj).length > 0;
+
+        if (!hasEntries) {
+          return '<span class="json-bracket">' + (isArray ? '[]' : '{}') + '</span>';
+        }
+
+        let html = '<span class="json-collapsible">';
+        html += '<span class="json-toggle" onclick="toggleCollapse(event)"></span>';
+        html += '<span class="json-bracket">' + (isArray ? '[' : '{') + '</span>';
+        html += '<span class="json-collapsed-preview">...</span>';
+        html += '<div class="json-children">';
+
+        if (isArray) {
+          obj.forEach((value, index) => {
+            html += '<div class="json-line">';
+            html += syntaxHighlight(value, depth + 1);
+            if (index < obj.length - 1) html += ',';
+            html += '</div>';
+          });
+        } else {
+          const keys = Object.keys(obj);
+          keys.forEach((key, index) => {
+            html += '<div class="json-line">';
+            html += '<span class="json-key">"' + escapeHtml(key) + '"</span>: ';
+            html += syntaxHighlight(obj[key], depth + 1);
+            if (index < keys.length - 1) html += ',';
+            html += '</div>';
+          });
+        }
+
+        html += '</div>';
+        html +=
+          '<span class="json-bracket json-bracket-close">' + (isArray ? ']' : '}') + '</span>';
+        html += '</span>';
+
+        return html;
+      }
+
+      function toggleCollapse(event) {
+        event.stopPropagation();
+        const collapsible = event.target.closest('.json-collapsible');
+        if (collapsible) {
+          collapsible.classList.toggle('collapsed');
+        }
+      }
+
+      // Handle messages from extension
+      window.addEventListener('message', event => {
+        const message = event.data;
+
+        evaluateBtn.disabled = false;
+        evaluateBtn.textContent = '▶ Evaluate';
+
+        switch (message.type) {
+          case 'result':
+            emptyState.style.display = 'none';
+
+            const resultDiv = document.createElement('div');
+            resultDiv.className = 'result-item';
+
+            const header = document.createElement('div');
+            header.className = 'result-header';
+            header.innerHTML = `
+                        <span class="result-expression">${escapeHtml(message.expression)}</span>
+                        ${message.resultType ? `<span class="result-type">${escapeHtml(message.resultType)}</span>` : ''}
+                    `;
+
+            const content = document.createElement('div');
+            content.className = 'result-content';
+
+            if (message.isJson) {
+              try {
+                const jsonObj = JSON.parse(message.result);
+                content.innerHTML = syntaxHighlight(jsonObj);
+              } catch {
+                content.textContent = message.result;
+              }
+            } else {
+              content.textContent = message.result;
+            }
+
+            resultDiv.appendChild(header);
+            resultDiv.appendChild(content);
+            resultsContainer.insertBefore(resultDiv, resultsContainer.firstChild);
+            break;
+
+          case 'error':
+            emptyState.style.display = 'none';
+
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error-message';
+            errorDiv.textContent = message.message;
+            resultsContainer.insertBefore(errorDiv, resultsContainer.firstChild);
+
+            setTimeout(() => errorDiv.remove(), 5000);
+            break;
+
+          case 'setExpression':
+            expressionInput.value = message.expression;
+            expressionInput.focus();
+            break;
+        }
+      });
+    </script>
+  </body>
+</html>

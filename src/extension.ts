@@ -1,22 +1,29 @@
+/**
+ * C# Debug Hints Extension
+ *
+ * Provides inline variable hints, object inspection, and expression evaluation
+ * during C# debugging sessions in VS Code.
+ */
 import * as vscode from 'vscode';
-import { DebugPoller, getCurrentFrameId } from './services';
-import { showEvaluationPanel, showObjectJson, showObjectPickerForLine, currentPanel } from './ui';
-import { DebugInlayHintsProvider } from './providers';
+import { DebugPoller } from './debug/poller';
+import { getCurrentFrameId } from './debug/dap';
+import { showEvaluationPanel, currentPanel } from './ui/panels/evaluation';
+import { showObjectJson, showObjectPickerForLine } from './ui/panels/objectViewer';
+import { DebugInlayHintsProvider } from './ui/inlayHints/provider';
 
 /**
- * Activate the C# Debug Hints extension
+ * Extension activation
  */
 export function activate(context: vscode.ExtensionContext): void {
   const inlayHintsProvider = new DebugInlayHintsProvider();
   const poller = new DebugPoller(inlayHintsProvider);
 
-  // Register inlay hints provider for C# files
   const inlayHintsDisposable = vscode.languages.registerInlayHintsProvider(
     { language: 'csharp', scheme: 'file' },
     inlayHintsProvider,
   );
 
-  // Command: Show object as JSON
+  // Command: Show object as JSON (called from inlay hint click)
   const showJsonCommand = vscode.commands.registerCommand(
     'csharpDebugHints.showObjectJson',
     async (varName: string) => {
@@ -24,7 +31,7 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   );
 
-  // Command: View object picker
+  // Command: View object JSON (triggered manually)
   const viewObjectCommand = vscode.commands.registerCommand(
     'csharpDebugHints.viewObjectJson',
     async () => {
@@ -48,16 +55,13 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
 
-      // Get expression from selection (if any)
       const editor = vscode.window.activeTextEditor;
       const selectedText = editor?.document.getText(editor.selection);
-
-      // Show evaluation panel with optional pre-filled expression
       await showEvaluationPanel(session, frameId, selectedText);
     },
   );
 
-  // Command: Evaluate expression in editor
+  // Command: Evaluate in already-open editor (keyboard shortcut)
   const evaluateInEditorCommand = vscode.commands.registerCommand(
     'csharpDebugHints.evaluateInEditor',
     async () => {
@@ -73,11 +77,9 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
 
-      // Trigger evaluation - the panel will read from the current input document
       if (currentPanel) {
         currentPanel.webview.postMessage({ type: 'triggerEvaluate' });
       } else {
-        // If no panel exists, create it
         const editor = vscode.window.activeTextEditor;
         const selectedText = editor?.document.getText(editor.selection);
         await showEvaluationPanel(session, frameId, selectedText);
@@ -85,7 +87,7 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   );
 
-  // Debug session event listeners
+  // Debug session lifecycle listeners
   const listeners = [
     vscode.debug.onDidChangeActiveDebugSession(session => {
       poller.setSession(session);

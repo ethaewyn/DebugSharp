@@ -1,10 +1,16 @@
+/**
+ * Object Viewer Module
+ *
+ * Provides commands to view object state as JSON during debugging.
+ */
 import * as vscode from 'vscode';
-import { serializeObjectToJson } from '../services/debugService';
-import { objectReferences } from '../providers/inlayHintsProvider';
+import { serializeObjectToJson } from '../../debug/serializer';
+import { objectReferences } from '../inlayHints/provider';
 import { createJsonWebviewPanel } from './webview';
 
 /**
- * Show quick pick to select which object to view when multiple objects are available
+ * Show object picker for the current line
+ * If only one object, shows it directly. Otherwise shows quick pick.
  */
 export async function showObjectPickerForLine(): Promise<void> {
   const objectNames = Array.from(objectReferences.keys());
@@ -30,7 +36,9 @@ export async function showObjectPickerForLine(): Promise<void> {
 }
 
 /**
- * Show formatted JSON popup for an object in a webview panel
+ * Display object contents as JSON in a webview
+ *
+ * @param varName - Variable name to serialize
  */
 export async function showObjectJson(varName: string): Promise<void> {
   const objRef = objectReferences.get(varName);
@@ -42,9 +50,9 @@ export async function showObjectJson(varName: string): Promise<void> {
   try {
     const jsonObj = await serializeObjectToJson(objRef.session, objRef.variablesReference);
     const jsonString = JSON.stringify(jsonObj, null, 2);
-
     createJsonWebviewPanel(`${varName} - JSON View`, jsonString);
-  } catch (error: any) {
-    vscode.window.showErrorMessage(`Failed to serialize object: ${error.message}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    vscode.window.showErrorMessage(`Failed to serialize object: ${message}`);
   }
 }

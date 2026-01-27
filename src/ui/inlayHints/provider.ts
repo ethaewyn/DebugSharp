@@ -1,11 +1,10 @@
 import * as vscode from 'vscode';
-import { DebugVariables, ObjectReference } from '../models/debugModels';
-import { MAX_INLINE_VALUE_LENGTH } from '../config/constants';
+import { DebugVariables } from '../../models/DebugVariables';
+import { ObjectReference } from '../../models/ObjectReference';
+import { MAX_INLINE_VALUE_LENGTH } from '../../config/constants';
 
-// Store object references for JSON popup
 export const objectReferences = new Map<string, ObjectReference>();
 
-// Current debug state
 let currentVariables: DebugVariables = {};
 let currentSession: vscode.DebugSession | undefined;
 
@@ -19,56 +18,16 @@ export function updateInlayHintData(
   currentVariables = variables;
   currentSession = session;
 
-  // Update object references
   objectReferences.clear();
   if (session) {
     for (const varKey of Object.keys(variables)) {
       const varName = varKey.split(' ')[0];
       const varInfo = variables[varKey];
       if (varInfo.variablesReference && varInfo.variablesReference > 0) {
-        objectReferences.set(varName, {
-          session: session,
-          variablesReference: varInfo.variablesReference,
-        });
+        objectReferences.set(varName, { session, variablesReference: varInfo.variablesReference });
       }
     }
   }
-}
-
-/**
- * Check if a line should be skipped for hints
- */
-function shouldSkipLine(lineText: string): boolean {
-  const trimmed = lineText.trim();
-  return trimmed.length === 0 || trimmed.startsWith('//');
-}
-
-/**
- * Extract declared variable name from a line
- */
-function getDeclaraionVarName(lineText: string): string | null {
-  const declarationMatch =
-    /(var|const|int|string|bool|double|float|decimal|List<?\w+>?|Dictionary<?\w+,\s*\w+>?)\s+(\w+)\s*=/.exec(
-      lineText,
-    );
-  return declarationMatch ? declarationMatch[2] : null;
-}
-
-/**
- * Format variable value for display
- */
-function formatVariableValue(varInfo: { value: string; variablesReference?: number }): {
-  displayValue: string;
-  isObject: boolean;
-} {
-  if (varInfo.variablesReference && varInfo.variablesReference > 0) {
-    return { displayValue: '{Object}', isObject: true };
-  }
-
-  const value = varInfo.value;
-  const displayValue =
-    value.length > MAX_INLINE_VALUE_LENGTH ? value.substring(0, 50) + '...' : value;
-  return { displayValue, isObject: false };
 }
 
 /**
@@ -101,7 +60,7 @@ export class DebugInlayHintsProvider implements vscode.InlayHintsProvider {
         continue;
       }
 
-      const declaredVarName = getDeclaraionVarName(line.text);
+      const declaredVarName = getDeclarationVarName(line.text);
       const varsOnLine: Array<{ name: string; value: string; isObject: boolean }> = [];
 
       for (const varKey of Object.keys(currentVariables)) {
@@ -109,14 +68,10 @@ export class DebugInlayHintsProvider implements vscode.InlayHintsProvider {
         const wordBoundaryRegex = new RegExp(`\\b${varName}\\b`);
 
         if (wordBoundaryRegex.test(line.text)) {
-          // If this is a declaration line, only show the declared variable
-          if (declaredVarName && varName !== declaredVarName) {
-            continue;
-          }
+          if (declaredVarName && varName !== declaredVarName) continue;
 
           const varInfo = currentVariables[varKey];
           const { displayValue, isObject } = formatVariableValue(varInfo);
-
           varsOnLine.push({ name: varName, value: displayValue, isObject });
         }
       }
@@ -160,4 +115,31 @@ export class DebugInlayHintsProvider implements vscode.InlayHintsProvider {
     const label = [new vscode.InlayHintLabelPart(' // '), ...parts];
     return new vscode.InlayHint(position, label, vscode.InlayHintKind.Type);
   }
+}
+
+function shouldSkipLine(lineText: string): boolean {
+  const trimmed = lineText.trim();
+  return trimmed.length === 0 || trimmed.startsWith('//');
+}
+
+function getDeclarationVarName(lineText: string): string | null {
+  const declarationMatch =
+    /(var|const|int|string|bool|double|float|decimal|List<?\w+>?|Dictionary<?\w+,\s*\w+>?)\s+(\w+)\s*=/.exec(
+      lineText,
+    );
+  return declarationMatch ? declarationMatch[2] : null;
+}
+
+function formatVariableValue(varInfo: { value: string; variablesReference?: number }): {
+  displayValue: string;
+  isObject: boolean;
+} {
+  if (varInfo.variablesReference && varInfo.variablesReference > 0) {
+    return { displayValue: '{Object}', isObject: true };
+  }
+
+  const value = varInfo.value;
+  const displayValue =
+    value.length > MAX_INLINE_VALUE_LENGTH ? value.substring(0, 50) + '...' : value;
+  return { displayValue, isObject: false };
 }
