@@ -18,6 +18,16 @@
         "command": "csharpDebugHints.evaluateExpression",
         "title": "Evaluate Expression",
         "category": "C# Debug Hints"
+      },
+      {
+        "command": "csharpDebugHints.showObjectJson",
+        "title": "Show Object as JSON",
+        "category": "C# Debug Hints"
+      },
+      {
+        "command": "csharpDebugHints.viewObjectJson",
+        "title": "View Object as JSON",
+        "category": "C# Debug Hints"
       }
     ],
     "menus": {
@@ -26,6 +36,11 @@
           "command": "csharpDebugHints.evaluateExpression",
           "when": "debugState == 'stopped'",
           "group": "debug@1"
+        },
+        {
+          "command": "csharpDebugHints.viewObjectJson",
+          "when": "debugState == 'stopped'",
+          "group": "debug@2"
         }
       ]
     }

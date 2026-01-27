@@ -1,7 +1,12 @@
 import * as vscode from 'vscode';
 
+export interface VariableInfo {
+  value: string;
+  variablesReference?: number;
+}
+
 export interface DebugVariables {
-  [key: string]: string;
+  [key: string]: VariableInfo;
 }
 
 /**
@@ -29,7 +34,10 @@ export async function getVariablesForFrame(
 
       if (varsResponse?.variables) {
         varsResponse.variables.forEach((v: any) => {
-          variables[v.name] = v.value;
+          variables[v.name] = {
+            value: v.value,
+            variablesReference: v.variablesReference,
+          };
         });
       }
     }
@@ -39,6 +47,71 @@ export async function getVariablesForFrame(
   }
 
   return variables;
+}
+
+/**
+ * Fetch properties of an object given its variablesReference
+ */
+export async function getObjectProperties(
+  session: vscode.DebugSession,
+  variablesReference: number,
+): Promise<Array<{ name: string; value: string; variablesReference?: number }>> {
+  try {
+    const response = await session.customRequest('variables', {
+      variablesReference: variablesReference,
+    });
+
+    if (response?.variables) {
+      return response.variables.map((v: any) => ({
+        name: v.name,
+        value: v.value,
+        variablesReference: v.variablesReference,
+      }));
+    }
+  } catch (error) {
+    // Fail silently
+  }
+
+  return [];
+}
+
+/**
+ * Recursively serialize an object to JSON-like structure
+ */
+export async function serializeObjectToJson(
+  session: vscode.DebugSession,
+  variablesReference: number,
+  depth: number = 0,
+  maxDepth: number = 5,
+): Promise<any> {
+  if (depth >= maxDepth) {
+    return '{ ... }'; // Prevent infinite recursion
+  }
+
+  try {
+    const properties = await getObjectProperties(session, variablesReference);
+    const result: any = {};
+
+    for (const prop of properties) {
+      // If property has a variablesReference, it's an object/array
+      if (prop.variablesReference && prop.variablesReference > 0) {
+        // Recursively serialize nested objects
+        result[prop.name] = await serializeObjectToJson(
+          session,
+          prop.variablesReference,
+          depth + 1,
+          maxDepth,
+        );
+      } else {
+        // Parse primitive values
+        result[prop.name] = prop.value;
+      }
+    }
+
+    return result;
+  } catch (error) {
+    return '{ error }';
+  }
 }
 
 /**

@@ -1,84 +1,281 @@
 import * as vscode from 'vscode';
-import { DebugVariables } from './debugger';
-import { MAX_VALUE_LENGTH, VALUE_TRUNCATE_LENGTH } from './constants';
+import { serializeObjectToJson } from './debugger';
+import { objectReferences } from './inlayhints';
 
 /**
- * Update inline hints for variables in the current editor
+ * Show quick pick to select which object to view when multiple objects are available
  */
-export function updateInlineHints(
-  editor: vscode.TextEditor,
-  decorationType: vscode.TextEditorDecorationType,
-  variables: DebugVariables,
-) {
-  const doc = editor.document;
-  const decorations: vscode.DecorationOptions[] = [];
+export async function showObjectPickerForLine() {
+  const objectNames = Array.from(objectReferences.keys());
 
-  if (!variables || Object.keys(variables).length === 0) {
-    editor.setDecorations(decorationType, []);
+  if (objectNames.length === 0) {
+    vscode.window.showInformationMessage('No objects found on current line');
     return;
   }
 
-  // Iterate through document lines
-  for (let lineNum = 0; lineNum < doc.lineCount; lineNum++) {
-    const line = doc.lineAt(lineNum);
-    const trimmed = line.text.trim();
-
-    // Skip empty lines and comments
-    if (trimmed.length === 0 || trimmed.startsWith('//')) {
-      continue;
-    }
-
-    // Check if this is a declaration line and extract the variable being declared
-    const declarationMatch =
-      /(var|const|int|string|bool|double|float|decimal|List<?\w+>?|Dictionary<?\w+,\s*\w+>?)\s+(\w+)\s*=/.exec(
-        line.text,
-      );
-    const declaredVarName = declarationMatch ? declarationMatch[2] : null;
-
-    // Try to find any variable from our list on this line
-    for (const varKey of Object.keys(variables)) {
-      // Extract just the variable name (before the type info)
-      // varKey looks like "a [int]" or "args [string[]]"
-      const varName = varKey.split(' ')[0];
-
-      // Use word boundary to match only whole words, not partial matches
-      const wordBoundaryRegex = new RegExp(`\\b${varName}\\b`);
-
-      // Check if variable appears on this line (with word boundaries)
-      if (wordBoundaryRegex.test(line.text)) {
-        // If this is a declaration line, prioritize showing the declared variable
-        if (declaredVarName && varName !== declaredVarName) {
-          continue; // Skip non-declared variables on declaration lines
-        }
-
-        const value = variables[varKey];
-        const displayValue =
-          value.length > MAX_VALUE_LENGTH
-            ? value.substring(0, VALUE_TRUNCATE_LENGTH) + '...'
-            : value;
-
-        decorations.push({
-          range: new vscode.Range(line.range.end, line.range.end),
-          renderOptions: {
-            after: {
-              contentText: ` // ${varName} = ${displayValue}`,
-            },
-          },
-        });
-        break; // Only one hint per line
-      }
-    }
+  if (objectNames.length === 1) {
+    // If only one object, show it directly
+    await showObjectJson(objectNames[0]);
+    return;
   }
 
-  editor.setDecorations(decorationType, decorations);
+  // Multiple objects - show picker
+  const selected = await vscode.window.showQuickPick(objectNames, {
+    placeHolder: 'Select an object to view as JSON',
+    title: 'View Object as JSON',
+  });
+
+  if (selected) {
+    await showObjectJson(selected);
+  }
 }
 
 /**
- * Clear all inline hints for the given editor
+ * Show formatted JSON popup for an object in a webview dialog
  */
-export function clearHints(
-  editor: vscode.TextEditor | undefined,
-  decorationType: vscode.TextEditorDecorationType,
-) {
-  editor?.setDecorations(decorationType, []);
+export async function showObjectJson(varName: string) {
+  const objRef = objectReferences.get(varName);
+  if (!objRef) {
+    vscode.window.showErrorMessage(`No object reference found for ${varName}`);
+    return;
+  }
+
+  try {
+    const jsonObj = await serializeObjectToJson(objRef.session, objRef.variablesReference);
+    const jsonString = JSON.stringify(jsonObj, null, 2);
+
+    // Create a webview panel for the JSON
+    const panel = vscode.window.createWebviewPanel(
+      'objectJson',
+      `${varName} - JSON View`,
+      vscode.ViewColumn.Beside,
+      {
+        enableScripts: true,
+      },
+    );
+
+    panel.webview.html = getWebviewContent(varName, jsonString);
+  } catch (error: any) {
+    vscode.window.showErrorMessage(`Failed to serialize object: ${error.message}`);
+  }
+}
+
+function getWebviewContent(varName: string, jsonString: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${varName}</title>
+    <style>
+        body {
+            font-family: 'Consolas', 'Monaco', monospace;
+            padding: 20px;
+            color: var(--vscode-editor-foreground);
+            background-color: var(--vscode-editor-background);
+        }
+        h2 {
+            color: var(--vscode-editor-foreground);
+            border-bottom: 1px solid var(--vscode-panel-border);
+            padding-bottom: 10px;
+        }
+        .toolbar {
+            margin-bottom: 10px;
+        }
+        button {
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+            border: none;
+            padding: 8px 16px;
+            cursor: pointer;
+            border-radius: 3px;
+            margin-right: 5px;
+        }
+        button:hover {
+            background-color: var(--vscode-button-hoverBackground);
+        }
+        #json-container {
+            background-color: var(--vscode-textCodeBlock-background);
+            padding: 15px;
+            border-radius: 5px;
+            overflow: auto;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .json-key {
+            color: #9CDCFE;
+        }
+        .json-string {
+            color: #CE9178;
+        }
+        .json-number {
+            color: #B5CEA8;
+        }
+        .json-boolean {
+            color: #569CD6;
+        }
+        .json-null {
+            color: #569CD6;
+        }
+        .json-bracket {
+            color: var(--vscode-editor-foreground);
+        }
+        .json-line {
+            position: relative;
+        }
+        .json-collapsible {
+            display: inline-block;
+        }
+        .json-toggle {
+            cursor: pointer;
+            user-select: none;
+            display: inline-block;
+            width: 16px;
+            color: var(--vscode-icon-foreground);
+        }
+        .json-toggle::before {
+            content: '▼';
+            font-size: 10px;
+        }
+        .json-collapsible.collapsed .json-toggle::before {
+            content: '▶';
+        }
+        .json-collapsible.collapsed .json-content {
+            display: none;
+        }
+        .json-content {
+            display: inline;
+        }
+        .json-children {
+            margin-left: 20px;
+            display: block;
+        }
+        .json-collapsible.collapsed .json-children {
+            display: none;
+        }
+        .json-collapsible.collapsed .json-bracket-close {
+            display: inline;
+        }
+    </style>
+</head>
+<body>
+    <h2>Object: ${varName}</h2>
+    <div class="toolbar">
+        <button onclick="copyToClipboard()">📋 Copy to Clipboard</button>
+        <button onclick="expandAll()">⬇️ Expand All</button>
+        <button onclick="collapseAll()">➡️ Collapse All</button>
+    </div>
+    <div id="json-container"></div>
+    <script>
+        const jsonData = ${jsonString};
+        
+        function syntaxHighlight(obj, depth = 0) {
+            if (obj === null) {
+                return '<span class="json-null">null</span>';
+            }
+            
+            if (typeof obj === 'string') {
+                return '<span class="json-string">"' + escapeHtml(obj) + '"</span>';
+            }
+            
+            if (typeof obj === 'number') {
+                return '<span class="json-number">' + obj + '</span>';
+            }
+            
+            if (typeof obj === 'boolean') {
+                return '<span class="json-boolean">' + obj + '</span>';
+            }
+            
+            const isArray = Array.isArray(obj);
+            const entries = isArray ? obj : Object.entries(obj);
+            const hasEntries = isArray ? obj.length > 0 : Object.keys(obj).length > 0;
+            
+            if (!hasEntries) {
+                return '<span class="json-bracket">' + (isArray ? '[]' : '{}') + '</span>';
+            }
+            
+            let html = '<span class="json-collapsible">';
+            html += '<span class="json-toggle" onclick="toggleCollapse(event)"></span>';
+            html += '<span class="json-bracket">' + (isArray ? '[' : '{') + '</span>';
+            html += '<div class="json-children">';
+            
+            if (isArray) {
+                obj.forEach((value, index) => {
+                    html += '<div class="json-line">';
+                    html += syntaxHighlight(value, depth + 1);
+                    if (index < obj.length - 1) html += ',';
+                    html += '</div>';
+                });
+            } else {
+                const keys = Object.keys(obj);
+                keys.forEach((key, index) => {
+                    html += '<div class="json-line">';
+                    html += '<span class="json-key">"' + escapeHtml(key) + '"</span>: ';
+                    html += syntaxHighlight(obj[key], depth + 1);
+                    if (index < keys.length - 1) html += ',';
+                    html += '</div>';
+                });
+            }
+            
+            html += '</div>';
+            html += '<span class="json-bracket json-bracket-close">' + (isArray ? ']' : '}') + '</span>';
+            html += '</span>';
+            
+            return html;
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function toggleCollapse(event) {
+            event.stopPropagation();
+            const collapsible = event.target.closest('.json-collapsible');
+            if (collapsible) {
+                collapsible.classList.toggle('collapsed');
+            }
+        }
+        
+        function expandAll() {
+            document.querySelectorAll('.json-collapsible.collapsed').forEach(el => {
+                el.classList.remove('collapsed');
+            });
+        }
+        
+        function collapseAll() {
+            document.querySelectorAll('.json-collapsible').forEach(el => {
+                el.classList.add('collapsed');
+            });
+        }
+        
+        function copyToClipboard() {
+            const text = ${JSON.stringify(jsonString)};
+            navigator.clipboard.writeText(text).then(() => {
+                const btns = document.querySelectorAll('button');
+                const btn = btns[0];
+                const originalText = btn.textContent;
+                btn.textContent = '✓ Copied!';
+                setTimeout(() => btn.textContent = originalText, 2000);
+            });
+        }
+        
+        document.getElementById('json-container').innerHTML = syntaxHighlight(jsonData);
+    </script>
+</body>
+</html>`;
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, match => {
+    const escapeMap: { [key: string]: string } = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    };
+    return escapeMap[match];
+  });
 }

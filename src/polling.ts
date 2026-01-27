@@ -1,15 +1,15 @@
 import * as vscode from 'vscode';
 import { getCurrentFrameId, getVariablesForFrame } from './debugger';
-import { updateInlineHints, clearHints } from './hints';
 import { POLL_INTERVAL_MS } from './constants';
+import { updateInlayHintData } from './inlayhints';
 
 export class DebugPoller {
   private pollInterval: ReturnType<typeof setInterval> | null = null;
   private currentSession: vscode.DebugSession | undefined;
-  private decorationType: vscode.TextEditorDecorationType;
+  private inlayHintsProvider: any;
 
-  constructor(decorationType: vscode.TextEditorDecorationType) {
-    this.decorationType = decorationType;
+  constructor(inlayHintsProvider: any) {
+    this.inlayHintsProvider = inlayHintsProvider;
   }
 
   /**
@@ -35,7 +35,9 @@ export class DebugPoller {
       return;
     }
 
-    updateInlineHints(editor, this.decorationType, variables);
+    // Update inlay hints data
+    updateInlayHintData(variables, this.currentSession);
+    this.inlayHintsProvider.refresh();
   }
 
   /**
@@ -56,10 +58,9 @@ export class DebugPoller {
       clearInterval(this.pollInterval);
       this.pollInterval = null;
     }
-    const editor = vscode.window.activeTextEditor;
-    if (editor) {
-      clearHints(editor, this.decorationType);
-    }
+    // Clear inlay hints data
+    updateInlayHintData({}, undefined);
+    this.inlayHintsProvider.refresh();
   }
 
   /**

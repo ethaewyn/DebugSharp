@@ -1,15 +1,36 @@
 import * as vscode from 'vscode';
 import { DebugPoller } from './polling';
-import { DECORATION_CONFIG } from './constants';
 import { evaluateExpression, showEvaluationResult, promptForExpression } from './evaluate';
 import { getCurrentFrameId } from './debugger';
+import { showObjectJson, showObjectPickerForLine } from './hints';
+import { DebugInlayHintsProvider } from './inlayhints';
 
 export function activate(context: vscode.ExtensionContext) {
-  // Create decoration type for inline hints
-  const decorationType = vscode.window.createTextEditorDecorationType(DECORATION_CONFIG);
+  // Register inlay hints provider
+  const inlayHintsProvider = new DebugInlayHintsProvider();
+  const inlayHintsDisposable = vscode.languages.registerInlayHintsProvider(
+    { language: 'csharp', scheme: 'file' },
+    inlayHintsProvider,
+  );
 
   // Initialize debug poller
-  const poller = new DebugPoller(decorationType);
+  const poller = new DebugPoller(inlayHintsProvider);
+
+  // Register show object JSON command
+  const showJsonCommand = vscode.commands.registerCommand(
+    'csharpDebugHints.showObjectJson',
+    async (varName: string) => {
+      await showObjectJson(varName);
+    },
+  );
+
+  // Register view object picker command
+  const viewObjectCommand = vscode.commands.registerCommand(
+    'csharpDebugHints.viewObjectJson',
+    async () => {
+      await showObjectPickerForLine();
+    },
+  );
 
   // Register evaluate command
   const evaluateCommand = vscode.commands.registerCommand(
@@ -69,7 +90,13 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   ];
 
-  context.subscriptions.push(decorationType, evaluateCommand, ...listeners);
+  context.subscriptions.push(
+    inlayHintsDisposable,
+    showJsonCommand,
+    viewObjectCommand,
+    evaluateCommand,
+    ...listeners,
+  );
 }
 
 export function deactivate() {}
