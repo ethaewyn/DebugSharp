@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
 import {
   evaluateExpression,
   serializeObjectToJson,
@@ -8,9 +10,14 @@ import { EvaluationResult } from '../models/debugModels';
 
 let currentPanel: vscode.WebviewPanel | undefined;
 let currentSession: vscode.DebugSession | undefined;
+let inputDocument: vscode.TextDocument | undefined;
+let tempFilePath: string | undefined;
+
+// Export currentPanel so extension.ts can access it
+export { currentPanel };
 
 /**
- * Show or focus the evaluation panel
+ * Show or focus the evaluation panel with a C# editor for input
  */
 export async function showEvaluationPanel(
   session: vscode.DebugSession,
@@ -20,12 +27,38 @@ export async function showEvaluationPanel(
   // Store current session
   currentSession = session;
 
+  // Create or show input document as a temporary .cs file in the workspace
+  if (!inputDocument) {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+      vscode.window.showErrorMessage('No workspace folder open');
+      return;
+    }
+
+    // Create a temporary .cs file in the workspace root
+    const filePath = path.join(workspaceFolder.uri.fsPath, '.vscode-debug-eval.cs');
+    tempFilePath = filePath;
+    const content =
+      initialExpression ||
+      '// Enter C# expression here\n// This file has access to all types in your project\n';
+
+    // Write the file
+    fs.writeFileSync(filePath, content, 'utf8');
+
+    // Open the file
+    const uri = vscode.Uri.file(filePath);
+    inputDocument = await vscode.workspace.openTextDocument(uri);
+  }
+
+  // Show the document in editor
+  await vscode.window.showTextDocument(inputDocument, {
+    viewColumn: vscode.ViewColumn.One,
+    preview: false,
+  });
+
   // If panel already exists, reveal it
   if (currentPanel) {
     currentPanel.reveal(vscode.ViewColumn.Beside);
-    if (initialExpression) {
-      currentPanel.webview.postMessage({ type: 'setExpression', expression: initialExpression });
-    }
     return;
   }
 
@@ -47,10 +80,15 @@ export async function showEvaluationPanel(
     console.log('Received message from webview:', message);
     switch (message.type) {
       case 'evaluate':
-        const expression = message.expression;
+        // Get expression from the input document
+        const expression = inputDocument?.getText().trim() || '';
         console.log('Evaluating expression:', expression);
-        if (!expression?.trim()) {
-          console.log('Expression is empty, returning');
+        if (!expression || expression.startsWith('//')) {
+          console.log('Expression is empty or comment, returning');
+          currentPanel?.webview.postMessage({
+            type: 'error',
+            message: 'Please enter a valid C# expression in the editor',
+          });
           return;
         }
 
@@ -130,6 +168,17 @@ export async function showEvaluationPanel(
   currentPanel.onDidDispose(() => {
     currentPanel = undefined;
     currentSession = undefined;
+    inputDocument = undefined;
+
+    // Clean up temporary file
+    if (tempFilePath && fs.existsSync(tempFilePath)) {
+      try {
+        fs.unlinkSync(tempFilePath);
+      } catch (err) {
+        console.error('Failed to delete temp file:', err);
+      }
+      tempFilePath = undefined;
+    }
   });
 }
 
@@ -145,25 +194,16 @@ function getEvaluationPanelHtml(initialExpression?: string): string {
     <style>
         body {
             font-family: 'Consolas', 'Monaco', monospace;
-            padding: 0;
+            padding: 15px;
             margin: 0;
             color: var(--vscode-editor-foreground);
             background-color: var(--vscode-editor-background);
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
         }
         
-        .container {
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-        }
-        
-        .input-section {
+        .header {
             border-bottom: 1px solid var(--vscode-panel-border);
-            padding: 15px;
-            background-color: var(--vscode-editor-background);
+            padding-bottom: 15px;
+            margin-bottom: 15px;
         }
         
         h3 {
@@ -173,31 +213,16 @@ function getEvaluationPanelHtml(initialExpression?: string): string {
             font-weight: 600;
         }
         
-        .input-wrapper {
-            position: relative;
-            border: 1px solid var(--vscode-input-border);
-            border-radius: 3px;
-            background-color: var(--vscode-input-background);
-        }
-        
-        #expression-input {
-            width: 100%;
-            min-height: 80px;
-            padding: 10px;
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 13px;
-            color: var(--vscode-input-foreground);
-            background-color: var(--vscode-input-background);
-            border: none;
-            resize: vertical;
-            outline: none;
-            line-height: 1.6;
+        .info {
+            color: var(--vscode-descriptionForeground);
+            font-size: 12px;
+            margin-bottom: 10px;
         }
         
         .button-row {
-            margin-top: 10px;
             display: flex;
             gap: 8px;
+            margin-bottom: 15px;
         }
         
         button {
@@ -326,75 +351,54 @@ function getEvaluationPanelHtml(initialExpression?: string): string {
             padding: 40px 20px;
             font-size: 14px;
         }
-        
-        /* Syntax highlighting for input */
-        .syntax-keyword {
-            color: #569CD6;
-        }
-        .syntax-string {
-            color: #CE9178;
-        }
-        .syntax-number {
-            color: #B5CEA8;
-        }
-        .syntax-comment {
-            color: #6A9955;
-        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="input-section">
-            <h3>Expression</h3>
-            <div class="input-wrapper">
-                <textarea id="expression-input" placeholder="Enter C# expression... (e.g., x + y, myObject.Property, list.Count)">${escapedExpression}</textarea>
-            </div>
-            <div class="button-row">
-                <button id="evaluate-btn" onclick="evaluateExpression()">▶ Evaluate</button>
-                <button onclick="clearResults()">Clear Results</button>
-            </div>
+    <div class="header">
+        <h3>Debug Expression Evaluator</h3>
+        <div class="info">Write your C# expression in the editor on the left (with full IntelliSense), then click Evaluate or press Ctrl+Enter</div>
+        <div class="button-row">
+            <button id="evaluate-btn" onclick="evaluateExpression()">▶ Evaluate</button>
+            <button onclick="clearResults()">Clear Results</button>
         </div>
-        
-        <div class="output-section">
-            <div id="results"></div>
-            <div id="empty-state" class="empty-state">
-                Enter an expression above and click Evaluate to see results
-            </div>
-        </div>
+    </div>
+    
+    <div id="results"></div>
+    <div id="empty-state" class="empty-state">
+        Write a C# expression in the editor and click Evaluate (or press Ctrl+Enter) to see results
     </div>
     
     <script>
         const vscode = acquireVsCodeApi();
         const resultsContainer = document.getElementById('results');
         const emptyState = document.getElementById('empty-state');
-        const expressionInput = document.getElementById('expression-input');
         const evaluateBtn = document.getElementById('evaluate-btn');
         
-        // Handle Ctrl+Enter to evaluate
-        expressionInput.addEventListener('keydown', (e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                e.preventDefault();
-                evaluateExpression();
-            }
-        });
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
         
         function evaluateExpression() {
-            const expression = expressionInput.value.trim();
-            console.log('Evaluate button clicked, expression:', expression);
-            if (!expression) {
-                console.log('Expression is empty, not sending message');
-                return;
-            }
+            console.log('Evaluate button clicked');
             
             evaluateBtn.disabled = true;
             evaluateBtn.textContent = '⏳ Evaluating...';
             
-            console.log('Posting message to extension');
+            console.log('Posting evaluate message to extension');
             vscode.postMessage({
-                type: 'evaluate',
-                expression: expression
+                type: 'evaluate'
             });
         }
+        
+        // Listen for external evaluate triggers (e.g., from keyboard shortcut)
+        window.addEventListener('message', event => {
+            const message = event.data;
+            if (message.type === 'triggerEvaluate') {
+                evaluateExpression();
+            }
+        });
         
         function clearResults() {
             resultsContainer.innerHTML = '';

@@ -20,6 +20,11 @@
         "category": "C# Debug Hints"
       },
       {
+        "command": "csharpDebugHints.evaluateInEditor",
+        "title": "Evaluate Expression from Editor",
+        "category": "C# Debug Hints"
+      },
+      {
         "command": "csharpDebugHints.showObjectJson",
         "title": "Show Object as JSON",
         "category": "C# Debug Hints"
@@ -43,12 +48,21 @@
           "group": "debug@2"
         }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "command": "csharpDebugHints.evaluateInEditor",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "editorTextFocus && editorLangId == csharp && debugState == 'stopped'"
+      }
+    ]
   },
   "scripts": {
     "compile": "tsc -p ."
   },
   "devDependencies": {
+    "@types/node": "^22.10.5",
     "@types/vscode": "^1.108.1",
     "@vscode/vsce": "^3.7.1",
     "prettier": "^3.8.1",

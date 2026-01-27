@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { DebugPoller, getCurrentFrameId } from './services';
-import { showEvaluationPanel, showObjectJson, showObjectPickerForLine } from './ui';
+import { showEvaluationPanel, showObjectJson, showObjectPickerForLine, currentPanel } from './ui';
 import { DebugInlayHintsProvider } from './providers';
 
 /**
@@ -57,6 +57,34 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   );
 
+  // Command: Evaluate expression in editor
+  const evaluateInEditorCommand = vscode.commands.registerCommand(
+    'csharpDebugHints.evaluateInEditor',
+    async () => {
+      const session = poller.getSession();
+      if (!session) {
+        vscode.window.showWarningMessage('No active debug session');
+        return;
+      }
+
+      const frameId = await getCurrentFrameId(session);
+      if (frameId === null) {
+        vscode.window.showWarningMessage('Debugger is not paused');
+        return;
+      }
+
+      // Trigger evaluation - the panel will read from the current input document
+      if (currentPanel) {
+        currentPanel.webview.postMessage({ type: 'triggerEvaluate' });
+      } else {
+        // If no panel exists, create it
+        const editor = vscode.window.activeTextEditor;
+        const selectedText = editor?.document.getText(editor.selection);
+        await showEvaluationPanel(session, frameId, selectedText);
+      }
+    },
+  );
+
   // Debug session event listeners
   const listeners = [
     vscode.debug.onDidChangeActiveDebugSession(session => {
@@ -82,6 +110,7 @@ export function activate(context: vscode.ExtensionContext): void {
     showJsonCommand,
     viewObjectCommand,
     evaluateCommand,
+    evaluateInEditorCommand,
     ...listeners,
   );
 }
