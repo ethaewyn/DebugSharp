@@ -1,11 +1,28 @@
 {
-  "name": "cenas",
-  "displayName": "cenas",
-  "description": "cenas",
+  "name": "debugsharp",
+  "displayName": "DebugSharp",
+  "description": "Enhanced C# debugging experience with inline evaluation, JSON object viewing, and advanced debug hints",
   "version": "1.0.0",
-  "publisher": "me",
+  "publisher": "Ethaewyn",
+  "icon": "icon.png",
+  "categories": [
+    "Debuggers",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "csharp",
+    "c#",
+    "debug",
+    "debugger",
+    "evaluation",
+    "json"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Ethaewyn/debugsharp"
+  },
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.108.0"
   },
   "activationEvents": [
     "onDebug",
