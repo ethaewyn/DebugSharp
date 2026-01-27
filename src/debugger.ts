@@ -62,11 +62,23 @@ export async function getObjectProperties(
     });
 
     if (response?.variables) {
-      return response.variables.map((v: any) => ({
-        name: v.name,
-        value: v.value,
-        variablesReference: v.variablesReference,
-      }));
+      return response.variables
+        .filter((v: any) => {
+          // Filter out special properties like Raw View, Results View, etc.
+          if (v.name === 'Raw View' || v.name === 'Results View') {
+            return false;
+          }
+          // Filter out private/internal properties (starting with underscore or special chars)
+          if (v.name.startsWith('_') || v.name.startsWith('[')) {
+            return false;
+          }
+          return true;
+        })
+        .map((v: any) => ({
+          name: v.name,
+          value: v.value,
+          variablesReference: v.variablesReference,
+        }));
     }
   } catch (error) {
     // Fail silently
@@ -93,18 +105,52 @@ export async function serializeObjectToJson(
     const result: any = {};
 
     for (const prop of properties) {
+      // Clean property name - remove quotes and type annotation like " [int]"
+      let cleanName = prop.name.trim();
+
+      // Remove type annotation in brackets: "MyProp {MyClass}" -> "MyProp"
+      cleanName = cleanName.replace(/\s*\{.*\}.*$/, '');
+
+      // Remove type annotation with brackets: "MyProp [int]" -> "MyProp"
+      cleanName = cleanName.replace(/\s*\[.*\].*$/, '');
+
+      // Remove everything after the first space
+      if (cleanName.includes(' ')) {
+        cleanName = cleanName.split(' ')[0];
+      }
+
+      // Remove surrounding quotes if present
+      cleanName = cleanName.replace(/^["'](.*)["']$/, '$1').trim();
+
       // If property has a variablesReference, it's an object/array
       if (prop.variablesReference && prop.variablesReference > 0) {
         // Recursively serialize nested objects
-        result[prop.name] = await serializeObjectToJson(
+        result[cleanName] = await serializeObjectToJson(
           session,
           prop.variablesReference,
           depth + 1,
           maxDepth,
         );
       } else {
-        // Parse primitive values
-        result[prop.name] = prop.value;
+        // Parse primitive values - try to convert to proper types
+        const value = prop.value;
+
+        // Try to parse as number
+        if (!isNaN(Number(value)) && value !== '') {
+          result[cleanName] = Number(value);
+        }
+        // Try to parse as boolean
+        else if (value === 'true' || value === 'false') {
+          result[cleanName] = value === 'true';
+        }
+        // Try to parse as null
+        else if (value === 'null') {
+          result[cleanName] = null;
+        }
+        // Keep as string, but remove quotes if present
+        else {
+          result[cleanName] = value.replace(/^"(.*)"$/, '$1');
+        }
       }
     }
 

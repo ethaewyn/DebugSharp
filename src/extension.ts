@@ -63,7 +63,7 @@ export function activate(context: vscode.ExtensionContext) {
       // Evaluate the expression
       const result = await evaluateExpression(session, frameId, expression);
       if (result) {
-        await showEvaluationResult(expression, result);
+        await showEvaluationResult(expression, result, session);
       } else {
         vscode.window.showWarningMessage('Failed to evaluate expression');
       }

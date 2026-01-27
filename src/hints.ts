@@ -124,7 +124,7 @@ function getWebviewContent(varName: string, jsonString: string): string {
             position: relative;
         }
         .json-collapsible {
-            display: inline-block;
+            display: inline;
         }
         .json-toggle {
             cursor: pointer;
@@ -154,6 +154,14 @@ function getWebviewContent(varName: string, jsonString: string): string {
             display: none;
         }
         .json-collapsible.collapsed .json-bracket-close {
+            display: none;
+        }
+        .json-collapsed-preview {
+            display: none;
+            color: var(--vscode-descriptionForeground);
+            font-style: italic;
+        }
+        .json-collapsible.collapsed .json-collapsed-preview {
             display: inline;
         }
     </style>
@@ -197,6 +205,7 @@ function getWebviewContent(varName: string, jsonString: string): string {
             let html = '<span class="json-collapsible">';
             html += '<span class="json-toggle" onclick="toggleCollapse(event)"></span>';
             html += '<span class="json-bracket">' + (isArray ? '[' : '{') + '</span>';
+            html += '<span class="json-collapsed-preview">...</span>';
             html += '<div class="json-children">';
             
             if (isArray) {
