@@ -12,9 +12,61 @@ let currentPanel: vscode.WebviewPanel | undefined;
 let currentSession: vscode.DebugSession | undefined;
 let inputDocument: vscode.TextDocument | undefined;
 let tempFilePath: string | undefined;
+let debugSessionListener: vscode.Disposable | undefined;
+let documentCloseListener: vscode.Disposable | undefined;
 
 // Export currentPanel so extension.ts can access it
 export { currentPanel };
+
+/**
+ * Clean up temporary files and state
+ */
+async function cleanup(closePanel: boolean = true) {
+  // Close the input document first
+  if (inputDocument) {
+    const editor = vscode.window.visibleTextEditors.find(
+      e => e.document.uri.toString() === inputDocument?.uri.toString(),
+    );
+    if (editor) {
+      await vscode.window.showTextDocument(editor.document, editor.viewColumn);
+      await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+    }
+    inputDocument = undefined;
+  }
+
+  // Clean up temporary file after a short delay to ensure file is released
+  if (tempFilePath && fs.existsSync(tempFilePath)) {
+    setTimeout(() => {
+      try {
+        if (tempFilePath && fs.existsSync(tempFilePath)) {
+          fs.unlinkSync(tempFilePath);
+          tempFilePath = undefined;
+        }
+      } catch (err) {
+        console.error('Failed to delete temp file:', err);
+      }
+    }, 100);
+  }
+
+  // Dispose listeners
+  if (debugSessionListener) {
+    debugSessionListener.dispose();
+    debugSessionListener = undefined;
+  }
+
+  if (documentCloseListener) {
+    documentCloseListener.dispose();
+    documentCloseListener = undefined;
+  }
+
+  // Close panel only if requested
+  if (closePanel && currentPanel) {
+    currentPanel.dispose();
+    currentPanel = undefined;
+  }
+
+  currentSession = undefined;
+}
 
 /**
  * Show or focus the evaluation panel with a C# editor for input
@@ -37,10 +89,21 @@ export async function showEvaluationPanel(
 
     // Create a temporary .cs file in the workspace root
     const filePath = path.join(workspaceFolder.uri.fsPath, '.vscode-debug-eval.cs');
+
+    // Clean up any existing orphaned temp file from previous session
+    if (fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+        console.log('Cleaned up orphaned temp file from previous session');
+      } catch (err) {
+        console.error('Failed to delete orphaned temp file:', err);
+      }
+    }
+
     tempFilePath = filePath;
     const content =
       initialExpression ||
-      '// Enter C# expression here\n// This file has access to all types in your project\n';
+      "// Enter C# expression here\n// This file has access to all types in your project\n// Note: Ignore any red squiggles - they don't affect evaluation\n";
 
     // Write the file
     fs.writeFileSync(filePath, content, 'utf8');
@@ -80,11 +143,20 @@ export async function showEvaluationPanel(
     console.log('Received message from webview:', message);
     switch (message.type) {
       case 'evaluate':
-        // Get expression from the input document
-        const expression = inputDocument?.getText().trim() || '';
+        // Get expression from the input document and remove comments
+        const rawText = inputDocument?.getText() || '';
+
+        // Remove single-line comments and empty lines
+        const expression = rawText
+          .split('\n')
+          .map(line => line.replace(/\/\/.*$/, '').trim())
+          .filter(line => line.length > 0)
+          .join('\n')
+          .trim();
+
         console.log('Evaluating expression:', expression);
-        if (!expression || expression.startsWith('//')) {
-          console.log('Expression is empty or comment, returning');
+        if (!expression) {
+          console.log('Expression is empty, returning');
           currentPanel?.webview.postMessage({
             type: 'error',
             message: 'Please enter a valid C# expression in the editor',
@@ -164,21 +236,47 @@ export async function showEvaluationPanel(
     }
   }, undefined);
 
+  // Listen for debug session termination
+  if (!debugSessionListener) {
+    debugSessionListener = vscode.debug.onDidTerminateDebugSession(terminatedSession => {
+      if (terminatedSession === currentSession) {
+        console.log('Debug session terminated, cleaning up temp file but keeping panel open');
+        cleanup(false); // Don't close the panel
+      }
+    });
+  }
+
+  // Listen for document close to clean up temp file
+  if (!documentCloseListener && inputDocument && tempFilePath) {
+    const tempUri = inputDocument.uri.toString();
+    documentCloseListener = vscode.workspace.onDidCloseTextDocument(closedDoc => {
+      if (closedDoc.uri.toString() === tempUri) {
+        console.log('Temp document closed, deleting file');
+        // Delete the temp file
+        if (tempFilePath && fs.existsSync(tempFilePath)) {
+          setTimeout(() => {
+            try {
+              if (tempFilePath && fs.existsSync(tempFilePath)) {
+                fs.unlinkSync(tempFilePath);
+                console.log('Temp file deleted');
+              }
+            } catch (err) {
+              console.error('Failed to delete temp file:', err);
+            }
+          }, 100);
+        }
+        // Dispose this listener as it's no longer needed
+        if (documentCloseListener) {
+          documentCloseListener.dispose();
+          documentCloseListener = undefined;
+        }
+      }
+    });
+  }
+
   // Clean up when panel is closed
   currentPanel.onDidDispose(() => {
-    currentPanel = undefined;
-    currentSession = undefined;
-    inputDocument = undefined;
-
-    // Clean up temporary file
-    if (tempFilePath && fs.existsSync(tempFilePath)) {
-      try {
-        fs.unlinkSync(tempFilePath);
-      } catch (err) {
-        console.error('Failed to delete temp file:', err);
-      }
-      tempFilePath = undefined;
-    }
+    cleanup(true); // Close everything
   });
 }
 
