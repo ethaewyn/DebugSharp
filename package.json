@@ -76,7 +76,7 @@
     ]
   },
   "scripts": {
-    "compile": "tsc -p ."
+    "compile": "tsc -p . && node -e \"require('fs').cpSync('src/ui/panels/templates', 'out/ui/panels/templates', {recursive: true})\""
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
