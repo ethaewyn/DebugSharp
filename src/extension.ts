@@ -1,12 +1,6 @@
 import * as vscode from 'vscode';
 import { DebugPoller, getCurrentFrameId } from './services';
-import {
-  evaluateExpression,
-  showEvaluationResult,
-  promptForExpression,
-  showObjectJson,
-  showObjectPickerForLine,
-} from './ui';
+import { showEvaluationPanel, showObjectJson, showObjectPickerForLine } from './ui';
 import { DebugInlayHintsProvider } from './providers';
 
 /**
@@ -54,24 +48,12 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
 
-      // Get expression from selection or prompt user
+      // Get expression from selection (if any)
       const editor = vscode.window.activeTextEditor;
-      let expression = editor?.document.getText(editor.selection);
+      const selectedText = editor?.document.getText(editor.selection);
 
-      if (!expression) {
-        expression = await promptForExpression();
-        if (!expression) {
-          return;
-        }
-      }
-
-      // Evaluate and show result
-      const result = await evaluateExpression(session, frameId, expression);
-      if (result) {
-        await showEvaluationResult(expression, result, session);
-      } else {
-        vscode.window.showWarningMessage('Failed to evaluate expression');
-      }
+      // Show evaluation panel with optional pre-filled expression
+      await showEvaluationPanel(session, frameId, selectedText);
     },
   );
 

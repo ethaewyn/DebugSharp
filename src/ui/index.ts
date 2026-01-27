@@ -3,4 +3,4 @@
  */
 export * from './webview';
 export * from './objectViewer';
-export * from './evaluationPanel';
+export { showEvaluationPanel } from './evaluationPanel';
