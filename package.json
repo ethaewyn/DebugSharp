@@ -1,0 +1,42 @@
+{
+  "name": "cenas",
+  "displayName": "cenas",
+  "description": "cenas",
+  "version": "1.0.0",
+  "publisher": "me",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "activationEvents": [
+    "onDebug",
+    "onLanguage:csharp"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "csharpDebugHints.evaluateExpression",
+        "title": "Evaluate Expression",
+        "category": "C# Debug Hints"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "csharpDebugHints.evaluateExpression",
+          "when": "debugState == 'stopped'",
+          "group": "debug@1"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.108.1",
+    "@vscode/vsce": "^3.7.1",
+    "prettier": "^3.8.1",
+    "typescript": "^5.9.3"
+  }
+}
