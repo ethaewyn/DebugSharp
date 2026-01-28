@@ -7,14 +7,23 @@
 import * as vscode from 'vscode';
 import { DebugPoller } from './debug/poller';
 import { getCurrentFrameId } from './debug/dap';
-import { showEvaluationPanel, currentPanel } from './ui/panels/evaluation';
+import {
+  showEvaluationPanel,
+  currentPanel,
+  initializeEvaluationPanel,
+} from './ui/panels/evaluation';
 import { showObjectJson, showObjectPickerForLine } from './ui/panels/objectViewer';
 import { DebugInlayHintsProvider } from './ui/inlayHints/provider';
+import { initializeWebview } from './ui/panels/webview';
 
 /**
  * Extension activation
  */
 export function activate(context: vscode.ExtensionContext): void {
+  // Initialize webview modules with context
+  initializeWebview(context);
+  initializeEvaluationPanel(context);
+
   const inlayHintsProvider = new DebugInlayHintsProvider();
   const poller = new DebugPoller(inlayHintsProvider);
 

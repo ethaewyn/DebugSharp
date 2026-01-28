@@ -8,13 +8,31 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 let objectViewerTemplate: string | undefined;
+let extensionContext: vscode.ExtensionContext | undefined;
+
+/**
+ * Initialize the webview module with extension context
+ */
+export function initializeWebview(context: vscode.ExtensionContext): void {
+  extensionContext = context;
+}
 
 /**
  * Load and cache the HTML template
  */
 function getObjectViewerTemplate(): string {
   if (!objectViewerTemplate) {
-    const templatePath = path.join(__dirname, 'templates', 'objectViewer.html');
+    if (!extensionContext) {
+      throw new Error('Webview not initialized. Call initializeWebview() first.');
+    }
+    const templatePath = path.join(
+      extensionContext.extensionPath,
+      'out',
+      'ui',
+      'panels',
+      'templates',
+      'objectViewer.html',
+    );
     objectViewerTemplate = fs.readFileSync(templatePath, 'utf8');
   }
   return objectViewerTemplate;

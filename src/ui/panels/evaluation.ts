@@ -19,8 +19,16 @@ let tempFilePath: string | undefined;
 let debugSessionListener: vscode.Disposable | undefined;
 let documentCloseListener: vscode.Disposable | undefined;
 let evaluationTemplate: string | undefined;
+let extensionContext: vscode.ExtensionContext | undefined;
 
 export { currentPanel };
+
+/**
+ * Initialize the evaluation panel with extension context
+ */
+export function initializeEvaluationPanel(context: vscode.ExtensionContext): void {
+  extensionContext = context;
+}
 
 /**
  * Clean up resources: temp file, listeners, and optionally the panel
@@ -258,7 +266,17 @@ export async function showEvaluationPanel(
  */
 function getEvaluationTemplate(): string {
   if (!evaluationTemplate) {
-    const templatePath = path.join(__dirname, 'templates', 'evaluation.html');
+    if (!extensionContext) {
+      throw new Error('Evaluation panel not initialized. Call initializeEvaluationPanel() first.');
+    }
+    const templatePath = path.join(
+      extensionContext.extensionPath,
+      'out',
+      'ui',
+      'panels',
+      'templates',
+      'evaluation.html',
+    );
     evaluationTemplate = fs.readFileSync(templatePath, 'utf8');
   }
   return evaluationTemplate;
