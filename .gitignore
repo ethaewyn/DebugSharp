@@ -21,6 +21,7 @@ Thumbs.db
 
 # IDE
 .vscode-test/
+.vscode/debugsharp-eval/
 .idea/
 *.swp
 *.swo

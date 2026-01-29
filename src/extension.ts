@@ -15,6 +15,7 @@ import {
 import { showObjectJson, showObjectPickerForLine } from './ui/panels/objectViewer';
 import { DebugInlayHintsProvider } from './ui/inlayHints/provider';
 import { initializeWebview } from './ui/panels/webview';
+import { quickLaunch, generateLaunchConfigurations } from './debug/launcher';
 
 /**
  * Extension activation
@@ -52,7 +53,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const evaluateCommand = vscode.commands.registerCommand(
     'csharpDebugHints.evaluateExpression',
     async () => {
-      const session = poller.getSession();
+      const session = vscode.debug.activeDebugSession;
       if (!session) {
         vscode.window.showWarningMessage('No active debug session');
         return;
@@ -60,7 +61,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
       const frameId = await getCurrentFrameId(session);
       if (frameId === null) {
-        vscode.window.showWarningMessage('Debugger is not paused');
+        vscode.window.showWarningMessage('Debugger is not paused at a breakpoint');
         return;
       }
 
@@ -74,7 +75,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const evaluateInEditorCommand = vscode.commands.registerCommand(
     'csharpDebugHints.evaluateInEditor',
     async () => {
-      const session = poller.getSession();
+      const session = vscode.debug.activeDebugSession;
       if (!session) {
         vscode.window.showWarningMessage('No active debug session');
         return;
@@ -82,7 +83,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
       const frameId = await getCurrentFrameId(session);
       if (frameId === null) {
-        vscode.window.showWarningMessage('Debugger is not paused');
+        vscode.window.showWarningMessage('Debugger is not paused at a breakpoint');
         return;
       }
 
@@ -93,6 +94,22 @@ export function activate(context: vscode.ExtensionContext): void {
         const selectedText = editor?.document.getText(editor.selection);
         await showEvaluationPanel(session, frameId, selectedText);
       }
+    },
+  );
+
+  // Command: Quick launch project
+  const quickLaunchCommand = vscode.commands.registerCommand(
+    'csharpDebugHints.quickLaunch',
+    async () => {
+      await quickLaunch();
+    },
+  );
+
+  // Command: Generate launch configurations
+  const generateLaunchCommand = vscode.commands.registerCommand(
+    'csharpDebugHints.generateLaunchConfig',
+    async () => {
+      await generateLaunchConfigurations();
     },
   );
 
@@ -114,6 +131,13 @@ export function activate(context: vscode.ExtensionContext): void {
       poller.setSession(undefined);
       poller.stopPolling();
     }),
+    // Handle stopped/continue events for web apps
+    vscode.debug.onDidChangeBreakpoints(() => {
+      const session = vscode.debug.activeDebugSession;
+      if (session) {
+        poller.setSession(session);
+      }
+    }),
   ];
 
   context.subscriptions.push(
@@ -122,6 +146,8 @@ export function activate(context: vscode.ExtensionContext): void {
     viewObjectCommand,
     evaluateCommand,
     evaluateInEditorCommand,
+    quickLaunchCommand,
+    generateLaunchCommand,
     ...listeners,
   );
 }

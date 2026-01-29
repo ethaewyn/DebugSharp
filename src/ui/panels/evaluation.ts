@@ -76,6 +76,203 @@ async function cleanup(closePanel: boolean = true): Promise<void> {
 }
 
 /**
+ * Get local variables from current debug context for IntelliSense
+ */
+async function getDebugContextVariables(
+  session: vscode.DebugSession,
+  frameId: number,
+): Promise<string> {
+  try {
+    let contextCode = '// Available variables in current context:\n';
+    let foundVariables = false;
+    let isLambdaFrame = false;
+    let parentFrameId: number | undefined;
+
+    // Get stack trace to find current frame and detect lambdas
+    try {
+      const threadsResponse = await session.customRequest('threads', {});
+      if (threadsResponse?.threads && threadsResponse.threads.length > 0) {
+        const stackTraceResponse = await session.customRequest('stackTrace', {
+          threadId: threadsResponse.threads[0].id,
+          startFrame: 0,
+          levels: 20,
+        });
+
+        if (stackTraceResponse?.stackFrames && stackTraceResponse.stackFrames.length > 0) {
+          const currentFrame = stackTraceResponse.stackFrames.find((f: any) => f.id === frameId);
+
+          if (currentFrame) {
+            contextCode += `// Method: ${currentFrame.name}\n`;
+          } else {
+            // Frame not in stack trace - likely a lambda/nested scope
+            isLambdaFrame = true;
+            const parentFrame = stackTraceResponse.stackFrames.find(
+              (f: any) => !f.name.includes('[External Code]') && f.source,
+            );
+            if (parentFrame) {
+              parentFrameId = parentFrame.id;
+              contextCode += `// Lambda in: ${parentFrame.name}\n`;
+            }
+          }
+        }
+      }
+    } catch {
+      // Stack trace unavailable, continue
+    }
+
+    // Get scopes for the current frame
+    const scopesResponse = await session.customRequest('scopes', { frameId });
+    if (!scopesResponse?.scopes || scopesResponse.scopes.length === 0) {
+      return contextCode + '\n';
+    }
+
+    // Extract variables from all scopes
+    for (const scope of scopesResponse.scopes) {
+      if (scope.variablesReference > 0) {
+        const varsResponse = await session.customRequest('variables', {
+          variablesReference: scope.variablesReference,
+        });
+
+        if (varsResponse?.variables && varsResponse.variables.length > 0) {
+          foundVariables = true;
+          for (const v of varsResponse.variables) {
+            // Skip internal variables
+            if (v.name === 'this' || v.name.startsWith('$')) {
+              continue;
+            }
+
+            // Clean up variable name - remove type annotations in brackets
+            let cleanName = v.name;
+            const bracketIndex = cleanName.indexOf(' [');
+            if (bracketIndex > 0) {
+              cleanName = cleanName.substring(0, bracketIndex);
+            }
+
+            const cleanType = v.type?.replace('?', '') || 'object';
+            contextCode += `${cleanType} ${cleanName} = default; // ${v.value}\n`;
+          }
+        }
+      }
+    }
+
+    // If no variables found, try alternative methods
+    if (!foundVariables) {
+      // For lambdas, try to get parent frame variables
+      if (isLambdaFrame && parentFrameId) {
+        try {
+          const parentScopesResponse = await session.customRequest('scopes', {
+            frameId: parentFrameId,
+          });
+
+          if (parentScopesResponse?.scopes) {
+            for (const scope of parentScopesResponse.scopes) {
+              if (scope.variablesReference > 0) {
+                const varsResponse = await session.customRequest('variables', {
+                  variablesReference: scope.variablesReference,
+                });
+                if (varsResponse?.variables && varsResponse.variables.length > 0) {
+                  foundVariables = true;
+                  contextCode += `// Variables from parent scope (captured by lambda):\n`;
+                  for (const v of varsResponse.variables) {
+                    if (v.name === 'this' || v.name.startsWith('$')) {
+                      continue;
+                    }
+                    let cleanName = v.name;
+                    const bracketIndex = cleanName.indexOf(' [');
+                    if (bracketIndex > 0) {
+                      cleanName = cleanName.substring(0, bracketIndex);
+                    }
+                    const cleanType = v.type?.replace('?', '') || 'object';
+                    contextCode += `${cleanType} ${cleanName} = default; // ${v.value}\n`;
+                  }
+                }
+              }
+            }
+          }
+        } catch {
+          // Parent frame unavailable
+        }
+      }
+
+      // Try evaluating common lambda-local variable names
+      try {
+        const lambdaTestExprs = ['forecast', 'index', 'result', 'item', 'value', 'data'];
+        let foundLambdaVars = false;
+
+        for (const expr of lambdaTestExprs) {
+          try {
+            const result = await session.customRequest('evaluate', {
+              expression: expr,
+              frameId: frameId,
+              context: 'watch',
+            });
+
+            if (
+              result?.result &&
+              !result.result.includes('error') &&
+              !result.result.includes('does not exist') &&
+              !result.result.includes('not exist') &&
+              !result.result.includes('Cannot evaluate')
+            ) {
+              if (!foundLambdaVars) {
+                if (foundVariables) {
+                  contextCode += `// Lambda-local variables:\n`;
+                }
+                foundLambdaVars = true;
+              }
+              const cleanType = result.type || 'var';
+              contextCode += `${cleanType} ${expr} = default; // ${result.result}\n`;
+              foundVariables = true;
+            }
+          } catch {
+            // Expression not available
+          }
+        }
+      } catch {
+        // Lambda variable detection unavailable
+      }
+
+      // Try evaluating common framework objects
+      if (!foundVariables) {
+        try {
+          const testExprs = ['this', 'HttpContext', 'Request', 'Response', 'app', 'builder'];
+          for (const expr of testExprs) {
+            try {
+              const result = await session.customRequest('evaluate', {
+                expression: expr,
+                frameId: frameId,
+                context: 'watch',
+              });
+              if (
+                result?.result &&
+                !result.result.includes('error') &&
+                !result.result.includes('does not exist')
+              ) {
+                const cleanType = result.type || 'var';
+                contextCode += `${cleanType} ${expr} = default; // ${result.result}\n`;
+                foundVariables = true;
+              }
+            } catch {
+              // Expression not available
+            }
+          }
+        } catch {
+          // Framework object detection unavailable
+        }
+      }
+
+      if (!foundVariables) {
+        contextCode += '// No variables found in current context\n';
+      }
+    }
+
+    return contextCode + '\n';
+  } catch (error) {
+    return '';
+  }
+}
+
+/**
  * Show evaluation panel with C# editor for expression input
  *
  * Creates a temporary .cs file to provide full IntelliSense support,
@@ -100,7 +297,61 @@ export async function showEvaluationPanel(
       return;
     }
 
-    const filePath = path.join(workspaceFolder.uri.fsPath, '.vscode-debug-eval.cs');
+    // Create a mini SDK-style project for IntelliSense support
+    const evalDir = path.join(workspaceFolder.uri.fsPath, '.vscode', 'debugsharp-eval');
+    if (!fs.existsSync(evalDir)) {
+      fs.mkdirSync(evalDir, { recursive: true });
+    }
+
+    // Find the project being debugged and its dependencies
+    const debuggedProject = await findDebuggedProject(session);
+    let allRelevantProjects: string[] = [];
+    let targetFramework = 'net8.0';
+
+    if (debuggedProject && fs.existsSync(debuggedProject)) {
+      allRelevantProjects.push(debuggedProject);
+      // Add all its dependencies recursively
+      allRelevantProjects.push(...getProjectReferences(debuggedProject));
+      // Remove duplicates
+      allRelevantProjects = [...new Set(allRelevantProjects)];
+
+      // Get target framework from the debugged project
+      const tfm = getTargetFrameworkFromProject(debuggedProject);
+      if (tfm) {
+        targetFramework = tfm;
+      }
+    } else {
+      // Fallback: try to detect from debugger
+      targetFramework = (await detectTargetFramework(session)) || 'net8.0';
+    }
+
+    const projectReferences = allRelevantProjects
+      .filter(proj => !proj.includes('debugsharp-eval')) // Exclude our own eval project
+      .map(proj => {
+        const relativePath = path.relative(evalDir, proj).replace(/\\/g, '/');
+        return `    <ProjectReference Include="${relativePath}" />`;
+      })
+      .join('\n');
+
+    // Create/update .csproj file for IntelliSense
+    const projectPath = path.join(evalDir, 'DebugEval.csproj');
+    const projectContent = `<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>${targetFramework}</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Eval.cs" />
+  </ItemGroup>
+${projectReferences ? `  <ItemGroup>\n${projectReferences}\n  </ItemGroup>` : ''}
+</Project>`;
+
+    fs.writeFileSync(projectPath, projectContent, 'utf8');
+
+    const filePath = path.join(evalDir, 'Eval.cs');
 
     // Clean up any orphaned temp file from previous session
     if (fs.existsSync(filePath)) {
@@ -112,14 +363,50 @@ export async function showEvaluationPanel(
     }
 
     tempFilePath = filePath;
+
+    // Get current debug context for IntelliSense
+    let contextVariables = '';
+    try {
+      contextVariables = await getDebugContextVariables(session, frameId);
+    } catch {
+      // Continue without context
+    }
+
     const content =
-      initialExpression ||
-      "// Enter C# expression here\n// This file has access to all types in your project\n// Note: Ignore any red squiggles - they don't affect evaluation\n";
+      contextVariables +
+      (initialExpression ||
+        '// Enter C# expression here\n// This file has full IntelliSense support\n');
 
     fs.writeFileSync(filePath, content, 'utf8');
 
     const uri = vscode.Uri.file(filePath);
     inputDocument = await vscode.workspace.openTextDocument(uri);
+  } else {
+    // Update existing document with new context
+    try {
+      const contextVariables = await getDebugContextVariables(session, frameId);
+      const currentText = inputDocument.getText();
+
+      // Remove old context and add new one
+      const lines = currentText.split('\n');
+      const nonContextLines = lines.filter(line => !line.includes('// Available variables'));
+      const userCode = nonContextLines
+        .join('\n')
+        .replace(/^\/\/ .*$/gm, '')
+        .trim();
+
+      if (userCode) {
+        const edit = new vscode.WorkspaceEdit();
+        const fullRange = new vscode.Range(
+          inputDocument.lineAt(0).range.start,
+          inputDocument.lineAt(inputDocument.lineCount - 1).range.end,
+        );
+        edit.replace(inputDocument.uri, fullRange, contextVariables + userCode);
+        await vscode.workspace.applyEdit(edit);
+      }
+    } catch {
+      // Continue without updating context
+    }
   }
 
   await vscode.window.showTextDocument(inputDocument, {
@@ -149,10 +436,19 @@ export async function showEvaluationPanel(
       case 'evaluate':
         const rawText = inputDocument?.getText() || '';
 
+        // Filter out context variable declarations and comments
         const expression = rawText
           .split('\n')
-          .map(line => line.replace(/\/\/.*$/, '').trim())
-          .filter(line => line.length > 0)
+          .filter(line => {
+            const trimmed = line.trim();
+            // Skip context declarations and comment lines
+            return (
+              trimmed &&
+              !trimmed.startsWith('// Available variables') &&
+              !trimmed.match(/^[\w\[\]<>\.]+\s+\w+\s*=\s*default;/) &&
+              !trimmed.startsWith('//')
+            );
+          })
           .join('\n')
           .trim();
 
@@ -259,6 +555,111 @@ export async function showEvaluationPanel(
   currentPanel.onDidDispose(() => {
     cleanup(true);
   });
+}
+
+/**
+ * Detect target framework from debug session or use sensible default
+ */
+async function detectTargetFramework(session: vscode.DebugSession): Promise<string | null> {
+  try {
+    // Try to get runtime info from debugger
+    const result = await session.customRequest('evaluate', {
+      expression: 'System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription',
+      context: 'watch',
+    });
+
+    if (result?.result) {
+      const desc = result.result.toLowerCase();
+      // Extract version from something like ".NET 8.0.1" or ".NET Framework 4.8"
+      if (desc.includes('.net framework')) {
+        return 'net48'; // Use .NET Framework 4.8 as default for framework apps
+      }
+      const match = desc.match(/(\d+)\.(\d+)/);
+      if (match) {
+        return `net${match[1]}.${match[2]}`;
+      }
+    }
+  } catch {
+    // Ignore errors, we'll use a default
+  }
+  return null;
+}
+
+/**
+ * Find the .csproj file being debugged from the debug session
+ */
+async function findDebuggedProject(session: vscode.DebugSession): Promise<string | null> {
+  try {
+    // Try to get the program path from debug configuration
+    const config = session.configuration;
+    const programPath = config?.program;
+
+    if (programPath && typeof programPath === 'string') {
+      // The program path is usually something like: bin/Debug/net8.0/MyApp.dll
+      // Navigate up to find the .csproj file
+      let dir = path.dirname(programPath);
+
+      // Go up directories looking for a .csproj
+      for (let i = 0; i < 5; i++) {
+        const files = fs.readdirSync(dir);
+        const csprojFile = files.find(f => f.endsWith('.csproj'));
+        if (csprojFile) {
+          return path.join(dir, csprojFile);
+        }
+        const parent = path.dirname(dir);
+        if (parent === dir) break; // Reached root
+        dir = parent;
+      }
+    }
+  } catch {
+    // Ignore errors
+  }
+  return null;
+}
+
+/**
+ * Parse a .csproj file to get its ProjectReference dependencies
+ */
+function getProjectReferences(csprojPath: string): string[] {
+  try {
+    const content = fs.readFileSync(csprojPath, 'utf8');
+    const references: string[] = [];
+    const projectDir = path.dirname(csprojPath);
+
+    // Simple regex to find ProjectReference elements
+    const regex = /<ProjectReference\s+Include="([^"]+)"/g;
+    let match;
+
+    while ((match = regex.exec(content)) !== null) {
+      const refPath = match[1].replace(/\\/g, '/');
+      const absolutePath = path.resolve(projectDir, refPath);
+      if (fs.existsSync(absolutePath)) {
+        references.push(absolutePath);
+        // Recursively get dependencies of dependencies
+        references.push(...getProjectReferences(absolutePath));
+      }
+    }
+
+    return references;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Get target framework from a .csproj file
+ */
+function getTargetFrameworkFromProject(csprojPath: string): string | null {
+  try {
+    const content = fs.readFileSync(csprojPath, 'utf8');
+    const match = content.match(/<TargetFramework>([^<]+)<\/TargetFramework>/);
+    if (match) {
+      return match[1];
+    }
+  } catch {
+    // Ignore
+  }
+  return null;
 }
 
 /**

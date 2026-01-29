@@ -50,6 +50,17 @@
         "command": "csharpDebugHints.viewObjectJson",
         "title": "View Object as JSON",
         "category": "C# Debug Hints"
+      },
+      {
+        "command": "csharpDebugHints.quickLaunch",
+        "title": "Quick Launch Project",
+        "category": "C# Debug Hints",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "csharpDebugHints.generateLaunchConfig",
+        "title": "Generate Debug Configurations",
+        "category": "C# Debug Hints"
       }
     ],
     "menus": {
@@ -72,6 +83,11 @@
         "key": "ctrl+enter",
         "mac": "cmd+enter",
         "when": "editorTextFocus && editorLangId == csharp && debugState == 'stopped'"
+      },
+      {
+        "command": "csharpDebugHints.quickLaunch",
+        "key": "ctrl+f5",
+        "mac": "cmd+f5"
       }
     ]
   },
