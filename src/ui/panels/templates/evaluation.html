@@ -65,34 +65,29 @@
       }
 
       .result-item {
-        margin-bottom: 20px;
-        border: 1px solid var(--vscode-panel-border);
-        border-radius: 4px;
-        overflow: hidden;
+        margin-bottom: 8px;
+        padding: 8px 12px;
+        background-color: var(--vscode-textCodeBlock-background);
+        border-radius: 3px;
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
       }
 
-      .result-header {
-        background-color: var(--vscode-textCodeBlock-background);
-        padding: 8px 12px;
-        border-bottom: 1px solid var(--vscode-panel-border);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
+      .result-checkmark {
+        color: var(--vscode-charts-green);
+        font-size: 14px;
+        flex-shrink: 0;
       }
 
       .result-expression {
-        font-weight: 600;
-        color: var(--vscode-textLink-foreground);
-      }
-
-      .result-type {
-        font-size: 11px;
-        color: var(--vscode-descriptionForeground);
-      }
-
-      .result-content {
-        padding: 12px;
-        background-color: var(--vscode-editor-background);
+        font-family: 'Consolas', 'Monaco', monospace;
+        color: var(--vscode-editor-foreground);
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .error-message {
@@ -102,6 +97,16 @@
         border: 1px solid var(--vscode-inputValidation-errorBorder);
         border-radius: 3px;
         margin-bottom: 15px;
+      }
+
+      .info-message {
+        color: var(--vscode-notificationsInfoIcon-foreground);
+        padding: 12px;
+        background-color: var(--vscode-inputValidation-infoBackground);
+        border: 1px solid var(--vscode-inputValidation-infoBorder);
+        border-radius: 3px;
+        margin-bottom: 15px;
+        white-space: pre-wrap;
       }
 
       .json-key {
@@ -168,50 +173,34 @@
   </head>
   <body>
     <div class="header">
-      <h3>Debug Expression Evaluator</h3>
+      <h3>Expression History</h3>
       <div class="info">
-        Write your C# expression in the editor on the left (with full IntelliSense), then click
-        Evaluate or press Ctrl+Enter
+        Type C# expressions in the editor (full IntelliSense available)<br />
+        Press <strong>Ctrl+Enter</strong> to send to Debug Console
       </div>
       <div class="button-row">
-        <button id="evaluate-btn" onclick="evaluateExpression()">▶ Evaluate</button>
-        <button onclick="clearResults()">Clear Results</button>
+        <button onclick="clearResults()">Clear History</button>
       </div>
     </div>
 
     <div id="results"></div>
     <div id="empty-state" class="empty-state">
-      Write a C# expression in the editor and click Evaluate (or press Ctrl+Enter) to see results
+      No expressions evaluated yet<br />
+      <span style="font-size: 12px; margin-top: 8px; display: block"
+        >Type in the editor and press Ctrl+Enter</span
+      >
     </div>
 
     <script>
       const vscode = acquireVsCodeApi();
       const resultsContainer = document.getElementById('results');
       const emptyState = document.getElementById('empty-state');
-      const evaluateBtn = document.getElementById('evaluate-btn');
 
       function escapeHtml(text) {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
       }
-
-      function evaluateExpression() {
-        evaluateBtn.disabled = true;
-        evaluateBtn.textContent = '⏳ Evaluating...';
-
-        vscode.postMessage({
-          type: 'evaluate',
-        });
-      }
-
-      // Listen for external evaluate triggers (e.g., from keyboard shortcut)
-      window.addEventListener('message', event => {
-        const message = event.data;
-        if (message.type === 'triggerEvaluate') {
-          evaluateExpression();
-        }
-      });
 
       function clearResults() {
         resultsContainer.innerHTML = '';
@@ -286,39 +275,16 @@
       window.addEventListener('message', event => {
         const message = event.data;
 
-        evaluateBtn.disabled = false;
-        evaluateBtn.textContent = '▶ Evaluate';
-
         switch (message.type) {
           case 'result':
             emptyState.style.display = 'none';
 
             const resultDiv = document.createElement('div');
             resultDiv.className = 'result-item';
-
-            const header = document.createElement('div');
-            header.className = 'result-header';
-            header.innerHTML = `
-                        <span class="result-expression">${escapeHtml(message.expression)}</span>
-                        ${message.resultType ? `<span class="result-type">${escapeHtml(message.resultType)}</span>` : ''}
-                    `;
-
-            const content = document.createElement('div');
-            content.className = 'result-content';
-
-            if (message.isJson) {
-              try {
-                const jsonObj = JSON.parse(message.result);
-                content.innerHTML = syntaxHighlight(jsonObj);
-              } catch {
-                content.textContent = message.result;
-              }
-            } else {
-              content.textContent = message.result;
-            }
-
-            resultDiv.appendChild(header);
-            resultDiv.appendChild(content);
+            resultDiv.innerHTML = `
+              <span class="result-checkmark">✓</span>
+              <span class="result-expression" title="${escapeHtml(message.expression)}">${escapeHtml(message.expression)}</span>
+            `;
             resultsContainer.insertBefore(resultDiv, resultsContainer.firstChild);
             break;
 
@@ -331,6 +297,17 @@
             resultsContainer.insertBefore(errorDiv, resultsContainer.firstChild);
 
             setTimeout(() => errorDiv.remove(), 5000);
+            break;
+
+          case 'info':
+            emptyState.style.display = 'none';
+
+            const infoDiv = document.createElement('div');
+            infoDiv.className = 'info-message';
+            infoDiv.textContent = message.message;
+            resultsContainer.insertBefore(infoDiv, resultsContainer.firstChild);
+
+            setTimeout(() => infoDiv.remove(), 8000);
             break;
 
           case 'setExpression':

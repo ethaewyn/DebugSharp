@@ -5,25 +5,88 @@
  * during C# debugging sessions in VS Code.
  */
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import { DebugPoller } from './debug/poller';
 import { getCurrentFrameId } from './debug/dap';
 import {
   showEvaluationPanel,
   currentPanel,
   initializeEvaluationPanel,
+  createTempFile,
+  deleteTempFile,
 } from './ui/panels/evaluation';
 import { showObjectJson, showObjectPickerForLine } from './ui/panels/objectViewer';
 import { DebugInlayHintsProvider } from './ui/inlayHints/provider';
 import { initializeWebview } from './ui/panels/webview';
 import { quickLaunch, generateLaunchConfigurations } from './debug/launcher';
+import { registerVariableCompletionProvider, updateDebugContext } from './ui/completionProvider';
+
+/**
+ * Clean up any orphaned .vscode-debug-eval.cs files from previous sessions
+ */
+async function cleanupOrphanedTempFiles(): Promise<void> {
+  try {
+    const tempFiles = await vscode.workspace.findFiles(
+      '**/.vscode-debug-eval.cs',
+      '**/node_modules/**',
+    );
+    for (const file of tempFiles) {
+      try {
+        fs.unlinkSync(file.fsPath);
+      } catch {
+        // File might be in use or already deleted
+      }
+    }
+  } catch {
+    // Workspace might not be ready
+  }
+}
+
+/**
+ * Send expression from eval file to Debug Console
+ */
+async function sendExpressionToDebugConsole(expression: string): Promise<void> {
+  await vscode.commands.executeCommand('workbench.debug.action.focusRepl');
+  await vscode.commands.executeCommand('type', { text: expression });
+  await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+
+  // Add to history panel
+  if (currentPanel) {
+    currentPanel.webview.postMessage({
+      type: 'result',
+      expression: expression,
+      result: 'Sent to Debug Console',
+      resultType: 'history',
+      isJson: false,
+    });
+  }
+}
+
+/**
+ * Parse expression from text (removes comments and empty lines)
+ */
+function parseExpression(rawText: string): string {
+  return rawText
+    .split('\n')
+    .map(line => line.replace(/\/\/.*$/, '').trim())
+    .filter(line => line.length > 0)
+    .join('\n')
+    .trim();
+}
 
 /**
  * Extension activation
  */
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
   // Initialize webview modules with context
   initializeWebview(context);
   initializeEvaluationPanel(context);
+
+  // Clean up any leftover temp files from previous sessions
+  await cleanupOrphanedTempFiles();
+
+  // Register variable completion provider for evaluation file
+  registerVariableCompletionProvider(context);
 
   const inlayHintsProvider = new DebugInlayHintsProvider();
   const poller = new DebugPoller(inlayHintsProvider);
@@ -53,7 +116,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const evaluateCommand = vscode.commands.registerCommand(
     'csharpDebugHints.evaluateExpression',
     async () => {
-      const session = vscode.debug.activeDebugSession;
+      const session = poller.getSession();
       if (!session) {
         vscode.window.showWarningMessage('No active debug session');
         return;
@@ -61,9 +124,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
       const frameId = await getCurrentFrameId(session);
       if (frameId === null) {
-        vscode.window.showWarningMessage('Debugger is not paused at a breakpoint');
+        vscode.window.showWarningMessage('Debugger is not paused');
         return;
       }
+
+      // Update completion provider with current debug context
+      updateDebugContext(session, frameId);
 
       const editor = vscode.window.activeTextEditor;
       const selectedText = editor?.document.getText(editor.selection);
@@ -71,11 +137,11 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   );
 
-  // Command: Evaluate in already-open editor (keyboard shortcut)
+  // Command: Evaluate in already-open editor (keyboard shortcut - Ctrl+Enter)
   const evaluateInEditorCommand = vscode.commands.registerCommand(
     'csharpDebugHints.evaluateInEditor',
     async () => {
-      const session = vscode.debug.activeDebugSession;
+      const session = poller.getSession();
       if (!session) {
         vscode.window.showWarningMessage('No active debug session');
         return;
@@ -83,21 +149,35 @@ export function activate(context: vscode.ExtensionContext): void {
 
       const frameId = await getCurrentFrameId(session);
       if (frameId === null) {
-        vscode.window.showWarningMessage('Debugger is not paused at a breakpoint');
+        vscode.window.showWarningMessage('Debugger is not paused');
         return;
       }
 
-      if (currentPanel) {
-        currentPanel.webview.postMessage({ type: 'triggerEvaluate' });
-      } else {
-        const editor = vscode.window.activeTextEditor;
-        const selectedText = editor?.document.getText(editor.selection);
-        await showEvaluationPanel(session, frameId, selectedText);
+      updateDebugContext(session, frameId);
+
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || !editor.document.fileName.endsWith('.vscode-debug-eval.cs')) {
+        vscode.window.showWarningMessage('No evaluation file is active');
+        return;
+      }
+
+      const expression = parseExpression(editor.document.getText());
+      if (!expression) {
+        vscode.window.showWarningMessage('Please enter a valid C# expression');
+        return;
+      }
+
+      try {
+        await sendExpressionToDebugConsole(expression);
+      } catch (error) {
+        vscode.window.showErrorMessage(
+          `Error sending to Debug Console: ${(error as Error).message}`,
+        );
       }
     },
   );
 
-  // Command: Quick launch project
+  // Command: Quick launch
   const quickLaunchCommand = vscode.commands.registerCommand(
     'csharpDebugHints.quickLaunch',
     async () => {
@@ -107,7 +187,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Command: Generate launch configurations
   const generateLaunchCommand = vscode.commands.registerCommand(
-    'csharpDebugHints.generateLaunchConfig',
+    'csharpDebugHints.generateLaunchConfigurations',
     async () => {
       await generateLaunchConfigurations();
     },
@@ -123,20 +203,16 @@ export function activate(context: vscode.ExtensionContext): void {
         poller.stopPolling();
       }
     }),
-    vscode.debug.onDidStartDebugSession(session => {
+    vscode.debug.onDidStartDebugSession(async session => {
       poller.setSession(session);
       poller.startPolling();
+      await createTempFile(session);
     }),
     vscode.debug.onDidTerminateDebugSession(() => {
       poller.setSession(undefined);
       poller.stopPolling();
-    }),
-    // Handle stopped/continue events for web apps
-    vscode.debug.onDidChangeBreakpoints(() => {
-      const session = vscode.debug.activeDebugSession;
-      if (session) {
-        poller.setSession(session);
-      }
+      updateDebugContext(undefined, undefined);
+      deleteTempFile();
     }),
   ];
 

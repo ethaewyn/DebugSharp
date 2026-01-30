@@ -79,10 +79,16 @@
     },
     "keybindings": [
       {
+        "command": "csharpDebugHints.evaluateExpression",
+        "key": "ctrl+e",
+        "mac": "cmd+e",
+        "when": "editorTextFocus && editorLangId == csharp && debugState == 'stopped'"
+      },
+      {
         "command": "csharpDebugHints.evaluateInEditor",
         "key": "ctrl+enter",
         "mac": "cmd+enter",
-        "when": "editorTextFocus && editorLangId == csharp && debugState == 'stopped'"
+        "when": "resourceFilename == .vscode-debug-eval.cs"
       },
       {
         "command": "csharpDebugHints.quickLaunch",

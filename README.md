@@ -74,7 +74,39 @@ This extension works out of the box with no additional configuration required.
 
 ## Known Issues
 
-Please report issues at: [GitHub Issues](https://github.com/YOUR-USERNAME/debugsharp/issues)
+### Lambda Expression Evaluation
+
+**DebugSharp automatically handles lambda expressions!** 🎉
+
+When you try to evaluate expressions inside lambda bodies (common in ASP.NET minimal APIs), DebugSharp detects this and **automatically sends your expression to the Debug Console**, which can evaluate in lambda scopes.
+
+**How it works:**
+
+```csharp
+app.MapGet("/weather", () => {
+    var forecast = GetForecast();  // ← Breakpoint here
+    return forecast;  // Evaluate 'forecast' with IntelliSense
+});
+```
+
+1. Open the evaluation panel (Ctrl+Enter)
+2. Type your expression with **full IntelliSense support**
+3. Click Evaluate
+4. DebugSharp detects the lambda and sends it to Debug Console automatically
+5. Results appear in the Debug Console tab
+
+**Why this is needed:** The .NET debugger's standard expression evaluator cannot navigate lambda closures, but the Debug Console uses a different evaluation mechanism that works. DebugSharp gives you IntelliSense while routing evaluation to the right place.
+
+**Alternative approaches:**
+
+- Place breakpoints **outside** the lambda expression
+- Extract lambda body into a separate method for better debugging
+
+For technical details, see: [Roslyn Issue #16594](https://github.com/dotnet/roslyn/issues/16594)
+
+---
+
+Please report other issues at: [GitHub Issues](https://github.com/YOUR-USERNAME/debugsharp/issues)
 
 ## Release Notes
 
