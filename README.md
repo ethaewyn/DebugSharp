@@ -1,20 +1,19 @@
 # DebugSharp
 
-Enhanced C# debugging experience with inline evaluation, JSON object viewing, and advanced debug hints for Visual Studio Code.
+Enhanced C# debugging experience with inline evaluation, IntelliSense-powered expression editing, and advanced debug features for Visual Studio Code.
 
 ## Features
 
 - **Quick Launch** - Press `Ctrl+F5` to instantly debug any C# project in your workspace
 - **Smart Debug Configuration** - Auto-detect projects, launch profiles, and generate configurations
-- **Multi-Profile Support** - Automatically detects ASP.NET launch profiles (IIS Express, Kestrel, etc.)
-- **Inline Expression Evaluation**: Evaluate C# expressions directly from the editor while debugging
+- **IntelliSense Expression Evaluator**: Edit C# expressions with full IntelliSense (types + variables) and send to Debug Console
 - **JSON Object Viewer**: View complex objects as formatted JSON in a dedicated panel
-- **Quick Evaluation**: Use `Ctrl+Enter` (or `Cmd+Enter` on Mac) to quickly evaluate selected expressions
-- **Context Menu Integration**: Right-click in the editor during debug sessions for quick access to evaluation features
+- **Expression History**: Track all evaluated expressions in a compact history panel
+- **Seamless Lambda Support**: Automatically uses Debug Console context for lambda expressions
 
 ## Usage
 
-### Quick Launch (New!)
+### Quick Launch
 
 The fastest way to debug any C# project:
 
@@ -30,6 +29,35 @@ Works with:
 - Class libraries with `<OutputType>Exe</OutputType>`
 - Any runnable .NET project
 
+### Evaluate Expressions with IntelliSense
+
+**The best way to evaluate expressions during debugging:**
+
+1. Start debugging your C# application
+2. When stopped at a breakpoint, press **`Ctrl+E`** (Mac: `Cmd+E`) or right-click → "Evaluate Expression"
+3. A C# file opens with **full IntelliSense**:
+   - All your project types (classes, interfaces, enums)
+   - All runtime variables from current scope
+   - Member access with method suggestions
+4. Type your expression (e.g., `myObject.MyMethod()`, `items.Where(x => x.Price > 10).ToList()`)
+5. Press **`Ctrl+Enter`** (Mac: `Cmd+Enter`)
+6. Expression is sent to Debug Console and automatically evaluated
+7. View results in Debug Console, with history tracked in the side panel
+
+**Why this is better:**
+
+- ✅ Full IntelliSense for all types and variables
+- ✅ Works perfectly in lambda scopes (ASP.NET minimal APIs, LINQ, etc.)
+- ✅ See your command history
+- ✅ No "cannot evaluate in lambda" errors
+- ✅ Clean, focused workflow
+
+### View Objects as JSON
+
+1. While debugging, select a variable or expression
+2. Right-click and select "View Object as JSON"
+3. Explore the object structure in a formatted JSON viewer
+
 ### Generate Debug Configurations
 
 Automatically create launch.json entries for all projects:
@@ -38,35 +66,46 @@ Automatically create launch.json entries for all projects:
 2. All runnable projects and their launch profiles are added to `.vscode/launch.json`
 3. Use the Run and Debug panel to select and launch
 
-### Evaluate Expressions
+## Keyboard Shortcuts
 
-1. Start debugging your C# application
-2. When stopped at a breakpoint, select any expression in the editor
-3. Right-click and select "Evaluate Expression" or press `Ctrl+Enter` (Mac: `Cmd+Enter`)
-4. View the result in the evaluation panel
-
-### View Objects as JSON
-
-1. While debugging, select a variable or expression
-2. Right-click and select "View Object as JSON"
-3. Explore the object structure in a formatted JSON viewer
+- **`Ctrl+E`** (Mac: `Cmd+E`) - Open evaluation panel with IntelliSense
+- **`Ctrl+Enter`** (Mac: `Cmd+Enter`) - Send expression to Debug Console (when in eval file)
+- **`Ctrl+F5`** (Mac: `Cmd+F5`) - Quick launch project
 
 ## Requirements
 
-- Visual Studio Code 1.85.0 or higher
+- Visual Studio Code 1.108.0 or higher
 - .NET debugger (vsdbg) - comes with:
   - C# extension (ms-dotnettools.csharp) - **FREE and open source**, OR
   - C# Dev Kit (ms-dotnettools.csdevkit)
 
-**Note:** This extension works with **any .NET debugger** and is completely **free and open-source compatible**. IntelliSense works in all project types (SDK-style, legacy .csproj, or any C# project) by automatically creating a minimal project context.
+**Note:** This extension is completely **free and open-source compatible**. IntelliSense works in all project types by automatically creating a temporary evaluation file in your project folder.
 
 ## Commands
 
-- `C# Debug Hints: Quick Launch Project` - **`Ctrl+F5`** - Instantly debug any project in your workspace
+- `C# Debug Hints: Quick Launch Project` - **`Ctrl+F5`** - Instantly debug any project
 - `C# Debug Hints: Generate Debug Configurations` - Auto-generate launch.json for all projects
-- `C# Debug Hints: Evaluate Expression` - Evaluate the selected expression
-- `C# Debug Hints: Evaluate Expression from Editor` - Quick evaluate with keyboard shortcut
+- `C# Debug Hints: Evaluate Expression` - **`Ctrl+E`** - Open evaluation panel with IntelliSense
 - `C# Debug Hints: View Object as JSON` - Display object as JSON
+
+## How It Works
+
+### IntelliSense + Debug Console Integration
+
+DebugSharp creates a temporary `.vscode-debug-eval.cs` file in your project folder when debugging starts. This file:
+
+- ✅ Gives you full IntelliSense from the C# language server
+- ✅ Has access to all your project types
+- ✅ Shows runtime variables via a custom completion provider
+- ✅ Is automatically cleaned up when debugging stops
+
+When you press `Ctrl+Enter`, the expression is sent directly to the Debug Console, which:
+
+- ✅ Uses the `repl` context that works in lambda scopes
+- ✅ Evaluates with full access to closure variables
+- ✅ Shows results immediately
+
+**This gives you the best of both worlds:** IntelliSense while editing + powerful evaluation at runtime.
 
 ## Extension Settings
 
@@ -74,50 +113,9 @@ This extension works out of the box with no additional configuration required.
 
 ## Known Issues
 
-### Lambda Expression Evaluation
+None currently. The lambda expression evaluation issue that affected previous versions has been completely solved by using the Debug Console context.
 
-**DebugSharp automatically handles lambda expressions!** 🎉
-
-When you try to evaluate expressions inside lambda bodies (common in ASP.NET minimal APIs), DebugSharp detects this and **automatically sends your expression to the Debug Console**, which can evaluate in lambda scopes.
-
-**How it works:**
-
-```csharp
-app.MapGet("/weather", () => {
-    var forecast = GetForecast();  // ← Breakpoint here
-    return forecast;  // Evaluate 'forecast' with IntelliSense
-});
-```
-
-1. Open the evaluation panel (Ctrl+Enter)
-2. Type your expression with **full IntelliSense support**
-3. Click Evaluate
-4. DebugSharp detects the lambda and sends it to Debug Console automatically
-5. Results appear in the Debug Console tab
-
-**Why this is needed:** The .NET debugger's standard expression evaluator cannot navigate lambda closures, but the Debug Console uses a different evaluation mechanism that works. DebugSharp gives you IntelliSense while routing evaluation to the right place.
-
-**Alternative approaches:**
-
-- Place breakpoints **outside** the lambda expression
-- Extract lambda body into a separate method for better debugging
-
-For technical details, see: [Roslyn Issue #16594](https://github.com/dotnet/roslyn/issues/16594)
-
----
-
-Please report other issues at: [GitHub Issues](https://github.com/YOUR-USERNAME/debugsharp/issues)
-
-## Release Notes
-
-### 1.0.0
-
-Initial release of DebugSharp
-
-- Expression evaluation during debug sessions
-- JSON object viewer
-- Keyboard shortcuts for quick evaluation
-- Context menu integration
+Please report issues at: [GitHub Issues](https://github.com/Ethaewyn/debugsharp/issues)
 
 ## License
 

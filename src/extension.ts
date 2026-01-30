@@ -48,7 +48,7 @@ async function cleanupOrphanedTempFiles(): Promise<void> {
 async function sendExpressionToDebugConsole(expression: string): Promise<void> {
   await vscode.commands.executeCommand('workbench.debug.action.focusRepl');
   await vscode.commands.executeCommand('type', { text: expression });
-  await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+  await vscode.commands.executeCommand('workbench.action.debug.console.execute');
 
   // Add to history panel
   if (currentPanel) {
