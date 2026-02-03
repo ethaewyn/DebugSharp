@@ -5,6 +5,9 @@ Enhanced C# debugging experience with inline evaluation, IntelliSense-powered ex
 ## Features
 
 - **Quick Launch** - Press `Ctrl+F5` to instantly debug any C# project in your workspace
+- **Quick Build** - Press `Ctrl+Shift+B` to build any project without running
+- **Quick Clean** - Press `Ctrl+Shift+K` to clean any project's build artifacts
+- **Quick Rebuild** - Press `Ctrl+Shift+R` to clean and rebuild any project
 - **Smart Debug Configuration** - Auto-detect projects, launch profiles, and generate configurations
 - **IntelliSense Expression Evaluator**: Edit C# expressions with full IntelliSense (types + variables) and send to Debug Console
 - **JSON Object Viewer**: View complex objects as formatted JSON in a dedicated panel
@@ -13,21 +16,41 @@ Enhanced C# debugging experience with inline evaluation, IntelliSense-powered ex
 
 ## Usage
 
-### Quick Launch
+### Quick Launch & Build Commands
 
-The fastest way to debug any C# project:
+**Quick Launch** - The fastest way to debug any C# project:
 
 1. Press `Ctrl+F5` (Mac: `Cmd+F5`) or run command "Quick Launch Project"
 2. Select your project from the list
 3. If the project has multiple launch profiles (like ASP.NET projects), choose one
 4. Debugging starts automatically!
 
-Works with:
+**Quick Build** - Build without running:
+
+1. Press `Ctrl+Shift+B` (Mac: `Cmd+Shift+B`) or run command "Quick Build Project"
+2. Select your project from the list
+3. Project builds and shows progress in terminal
+
+**Quick Clean** - Clean build artifacts:
+
+1. Press `Ctrl+Shift+K` (Mac: `Cmd+Shift+K`) or run command "Quick Clean Project"
+2. Select your project from the list
+3. Removes all build outputs (bin/obj folders)
+
+**Quick Rebuild** - Clean and build in one step:
+
+1. Press `Ctrl+Shift+R` (Mac: `Cmd+Shift+R`) or run command "Quick Rebuild Project"
+2. Select your project from the list
+3. Cleans then builds the project in one terminal
+
+All commands work with:
 
 - Console applications
 - ASP.NET Core Web APIs and MVC apps (with launch profile detection)
 - Class libraries with `<OutputType>Exe</OutputType>`
 - Any runnable .NET project
+
+**No tasks.json required!** Everything is handled automatically.
 
 ### Evaluate Expressions with IntelliSense
 
@@ -48,9 +71,18 @@ Works with:
 
 - ✅ Full IntelliSense for all types and variables
 - ✅ Works perfectly in lambda scopes (ASP.NET minimal APIs, LINQ, etc.)
-- ✅ See your command history
-- ✅ No "cannot evaluate in lambda" errors
-- ✅ Clean, focused workflow
+
+### Project Management
+
+- **`Ctrl+F5`** (Mac: `Cmd+F5`) - Quick launch project (build + debug)
+- **`Ctrl+Shift+B`** (Mac: `Cmd+Shift+B`) - Quick build project
+- **`Ctrl+Shift+K`** (Mac: `Cmd+Shift+K`) - Quick clean project
+- **`Ctrl+Shift+R`** (Mac: `Cmd+Shift+R`) - Quick rebuild project
+
+### Debugging
+
+- **`Ctrl+E`** (Mac: `Cmd+E`) - Open evaluation panel with IntelliSense
+- **`Ctrl+Enter`** (Mac: `Cmd+Enter`) - Send expression to Debug Console (when in eval file)
 
 ### View Objects as JSON
 
@@ -77,7 +109,16 @@ Automatically create launch.json entries for all projects:
 - Visual Studio Code 1.108.0 or higher
 - .NET debugger (vsdbg) - comes with:
   - C# extension (ms-dotnettools.csharp) - **FREE and open source**, OR
-  - C# Dev Kit (ms-dotnettools.csdevkit)
+
+### Project Management
+
+- `C# Debug Hints: Quick Launch Project` - **`Ctrl+F5`** - Build and debug any project
+- `C# Debug Hints: Quick Build Project` - **`Ctrl+Shift+B`** - Build any project
+- `C# Debug Hints: Quick Clean Project` - **`Ctrl+Shift+K`** - Clean any project
+- `C# Debug Hints: Quick Rebuild Project` - **`Ctrl+Shift+R`** - Clean and rebuild any project
+- `C# Debug Hints: Generate Debug Configurations` - Auto-generate launch.json for all projects
+
+### Debugging
 
 **Note:** This extension is completely **free and open-source compatible**. IntelliSense works in all project types by automatically creating a temporary evaluation file in your project folder.
 

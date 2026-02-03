@@ -18,7 +18,13 @@ import {
 import { showObjectJson, showObjectPickerForLine } from './ui/panels/objectViewer';
 import { DebugInlayHintsProvider } from './ui/inlayHints/provider';
 import { initializeWebview } from './ui/panels/webview';
-import { quickLaunch, generateLaunchConfigurations } from './debug/launcher';
+import {
+  quickLaunch,
+  quickBuild,
+  quickClean,
+  quickRebuild,
+  generateLaunchConfigurations,
+} from './debug/launcher';
 import { registerVariableCompletionProvider, updateDebugContext } from './ui/completionProvider';
 
 /**
@@ -185,6 +191,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   );
 
+  // Command: Quick build
+  const quickBuildCommand = vscode.commands.registerCommand(
+    'csharpDebugHints.quickBuild',
+    async () => {
+      await quickBuild();
+    },
+  );
+
+  // Command: Quick clean
+  const quickCleanCommand = vscode.commands.registerCommand(
+    'csharpDebugHints.quickClean',
+    async () => {
+      await quickClean();
+    },
+  );
+
+  // Command: Quick rebuild
+  const quickRebuildCommand = vscode.commands.registerCommand(
+    'csharpDebugHints.quickRebuild',
+    async () => {
+      await quickRebuild();
+    },
+  );
+
   // Command: Generate launch configurations
   const generateLaunchCommand = vscode.commands.registerCommand(
     'csharpDebugHints.generateLaunchConfigurations',
@@ -223,6 +253,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     evaluateCommand,
     evaluateInEditorCommand,
     quickLaunchCommand,
+    quickBuildCommand,
+    quickCleanCommand,
+    quickRebuildCommand,
     generateLaunchCommand,
     ...listeners,
   );

@@ -104,9 +104,56 @@ async function analyzeProject(projectPath: string): Promise<ProjectInfo | null> 
 }
 
 /**
+ * Clean a project using dotnet clean
+ */
+export async function cleanProject(project: ProjectInfo): Promise<void> {
+  const projectDir = path.dirname(project.path);
+
+  return new Promise<void>((resolve, reject) => {
+    const terminal = vscode.window.createTerminal({
+      name: `Clean ${project.name}`,
+      cwd: projectDir,
+      hideFromUser: false,
+    });
+
+    vscode.window.showInformationMessage(`Cleaning ${project.name}...`);
+
+    // Show the terminal briefly
+    terminal.show(true);
+
+    // Use dotnet clean command - PowerShell compatible
+    terminal.sendText(`dotnet clean "${project.path}"`, true);
+
+    // Timeout after 60 seconds
+    const timeoutId = setTimeout(() => {
+      disposable.dispose();
+      vscode.window.showWarningMessage(`Clean timeout: ${project.name}`);
+      resolve(); // Continue anyway
+    }, 60000);
+
+    // Wait for terminal to close (clean complete)
+    const disposable = vscode.window.onDidCloseTerminal(async closedTerminal => {
+      if (closedTerminal === terminal) {
+        clearTimeout(timeoutId);
+        disposable.dispose();
+
+        // Check if clean succeeded by looking at exit code
+        if (closedTerminal.exitStatus?.code === 0) {
+          vscode.window.showInformationMessage(`✓ Clean succeeded: ${project.name}`);
+          resolve();
+        } else {
+          vscode.window.showErrorMessage(`Clean failed: ${project.name}`);
+          reject(new Error('Clean failed'));
+        }
+      }
+    });
+  });
+}
+
+/**
  * Build a project using dotnet build
  */
-async function buildProject(project: ProjectInfo): Promise<void> {
+export async function buildProject(project: ProjectInfo): Promise<void> {
   const projectDir = path.dirname(project.path);
 
   return new Promise<void>((resolve, reject) => {
@@ -122,7 +169,7 @@ async function buildProject(project: ProjectInfo): Promise<void> {
     terminal.show(true);
 
     // Use dotnet build command - PowerShell compatible
-    terminal.sendText(`dotnet build "${project.path}"; if ($?) { exit 0 } else { exit 1 }`, true);
+    terminal.sendText(`dotnet build "${project.path}"`, true);
 
     // Timeout after 60 seconds
     const timeoutId = setTimeout(() => {
@@ -358,6 +405,130 @@ export async function quickLaunch(): Promise<void> {
   // Start debugging
   const workspaceFolder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(project.path));
   await vscode.debug.startDebugging(workspaceFolder, config);
+}
+
+/**
+ * Quick build: Show project picker and build without running
+ */
+export async function quickBuild(): Promise<void> {
+  const projects = await findRunnableProjects();
+
+  if (projects.length === 0) {
+    vscode.window.showWarningMessage('No runnable C# projects found in workspace');
+    return;
+  }
+
+  // Show project picker
+  interface ProjectQuickPickItem extends vscode.QuickPickItem {
+    project: ProjectInfo;
+  }
+
+  const projectItems: ProjectQuickPickItem[] = projects.map(project => ({
+    label: `$(tools) ${project.name}`,
+    description: project.isWeb ? 'Web Application' : 'Console Application',
+    detail: `${project.targetFramework} • ${path.dirname(project.path)}`,
+    project,
+  }));
+
+  const selectedProject = await vscode.window.showQuickPick(projectItems, {
+    placeHolder: 'Select a project to build',
+    matchOnDescription: true,
+    matchOnDetail: true,
+  });
+
+  if (!selectedProject) {
+    return;
+  }
+
+  // Build the project
+  await buildProject(selectedProject.project);
+}
+
+/**
+ * Quick clean: Show project picker and clean
+ */
+export async function quickClean(): Promise<void> {
+  const projects = await findRunnableProjects();
+
+  if (projects.length === 0) {
+    vscode.window.showWarningMessage('No runnable C# projects found in workspace');
+    return;
+  }
+
+  // Show project picker
+  interface ProjectQuickPickItem extends vscode.QuickPickItem {
+    project: ProjectInfo;
+  }
+
+  const projectItems: ProjectQuickPickItem[] = projects.map(project => ({
+    label: `$(trash) ${project.name}`,
+    description: project.isWeb ? 'Web Application' : 'Console Application',
+    detail: `${project.targetFramework} • ${path.dirname(project.path)}`,
+    project,
+  }));
+
+  const selectedProject = await vscode.window.showQuickPick(projectItems, {
+    placeHolder: 'Select a project to clean',
+    matchOnDescription: true,
+    matchOnDetail: true,
+  });
+
+  if (!selectedProject) {
+    return;
+  }
+
+  // Clean the project
+  await cleanProject(selectedProject.project);
+}
+
+/**
+ * Quick rebuild: Show project picker and rebuild (clean + build)
+ */
+export async function quickRebuild(): Promise<void> {
+  const projects = await findRunnableProjects();
+
+  if (projects.length === 0) {
+    vscode.window.showWarningMessage('No runnable C# projects found in workspace');
+    return;
+  }
+
+  // Show project picker
+  interface ProjectQuickPickItem extends vscode.QuickPickItem {
+    project: ProjectInfo;
+  }
+
+  const projectItems: ProjectQuickPickItem[] = projects.map(project => ({
+    label: `$(sync) ${project.name}`,
+    description: project.isWeb ? 'Web Application' : 'Console Application',
+    detail: `${project.targetFramework} • ${path.dirname(project.path)}`,
+    project,
+  }));
+
+  const selectedProject = await vscode.window.showQuickPick(projectItems, {
+    placeHolder: 'Select a project to rebuild',
+    matchOnDescription: true,
+    matchOnDetail: true,
+  });
+
+  if (!selectedProject) {
+    return;
+  }
+
+  const project = selectedProject.project;
+  const projectDir = path.dirname(project.path);
+
+  // Chain clean and build in one terminal
+  const terminal = vscode.window.createTerminal({
+    name: `Rebuild ${project.name}`,
+    cwd: projectDir,
+    hideFromUser: false,
+  });
+
+  vscode.window.showInformationMessage(`Rebuilding ${project.name}...`);
+  terminal.show(true);
+
+  // Chain the commands together
+  terminal.sendText(`dotnet clean "${project.path}"; dotnet build "${project.path}"`);
 }
 
 /**
