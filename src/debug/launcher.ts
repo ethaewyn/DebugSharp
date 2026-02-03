@@ -7,6 +7,9 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 
+// Store the last used project/solution path for quick access
+let lastUsedItemPath: string | undefined;
+
 interface ProjectInfo {
   name: string;
   path: string;
@@ -15,6 +18,18 @@ interface ProjectInfo {
   isWeb: boolean;
   hasLaunchSettings: boolean;
   launchProfiles?: any;
+}
+
+interface SolutionInfo {
+  name: string;
+  path: string;
+  projectCount: number;
+}
+
+type BuildableItem = ProjectInfo | SolutionInfo;
+
+function isSolution(item: BuildableItem): item is SolutionInfo {
+  return 'projectCount' in item;
 }
 
 /**
@@ -33,6 +48,36 @@ export async function findRunnableProjects(): Promise<ProjectInfo[]> {
   }
 
   return projects;
+}
+
+/**
+ * Find all solution files in the workspace
+ */
+export async function findSolutionFiles(): Promise<SolutionInfo[]> {
+  const solutions: SolutionInfo[] = [];
+  const slnFiles = await vscode.workspace.findFiles('**/*.sln', '**/node_modules/**');
+
+  for (const uri of slnFiles) {
+    const solutionPath = uri.fsPath;
+    const solutionName = path.basename(solutionPath, '.sln');
+
+    // Count projects in the solution
+    try {
+      const content = fs.readFileSync(solutionPath, 'utf8');
+      const projectMatches = content.match(/Project\("{[^}]+}"\)/g);
+      const projectCount = projectMatches ? projectMatches.length : 0;
+
+      solutions.push({
+        name: solutionName,
+        path: solutionPath,
+        projectCount,
+      });
+    } catch {
+      // Skip if we can't read the solution file
+    }
+  }
+
+  return solutions;
 }
 
 /**
@@ -206,6 +251,108 @@ export async function buildProject(
 }
 
 /**
+ * Build a solution using dotnet build
+ */
+export async function buildSolution(
+  solution: SolutionInfo,
+  autoClose: boolean = false,
+): Promise<void> {
+  const solutionDir = path.dirname(solution.path);
+
+  return new Promise<void>((resolve, reject) => {
+    const terminal = vscode.window.createTerminal({
+      name: `Build ${solution.name}`,
+      cwd: solutionDir,
+      hideFromUser: false,
+    });
+
+    vscode.window.showInformationMessage(`Building solution ${solution.name}...`);
+
+    // Show the terminal briefly
+    terminal.show(true);
+
+    // Use dotnet build command - PowerShell compatible
+    const closeCommand = autoClose ? '; exit $LASTEXITCODE' : '';
+    terminal.sendText(`dotnet build "${solution.path}"${closeCommand}`, true);
+
+    // Timeout after 120 seconds (solutions may take longer)
+    const timeoutId = setTimeout(() => {
+      disposable.dispose();
+      vscode.window.showWarningMessage(`Build timeout: ${solution.name}`);
+      resolve(); // Continue anyway
+    }, 120000);
+
+    // Wait for terminal to close (build complete)
+    const disposable = vscode.window.onDidCloseTerminal(async closedTerminal => {
+      if (closedTerminal === terminal) {
+        clearTimeout(timeoutId);
+        disposable.dispose();
+
+        // Check if build succeeded by looking at exit code
+        if (closedTerminal.exitStatus?.code === 0) {
+          vscode.window.showInformationMessage(`✓ Build succeeded: ${solution.name}`);
+          resolve();
+        } else {
+          vscode.window.showErrorMessage(`Build failed: ${solution.name}`);
+          reject(new Error('Build failed'));
+        }
+      }
+    });
+  });
+}
+
+/**
+ * Clean a solution using dotnet clean
+ */
+export async function cleanSolution(
+  solution: SolutionInfo,
+  autoClose: boolean = false,
+): Promise<void> {
+  const solutionDir = path.dirname(solution.path);
+
+  return new Promise<void>((resolve, reject) => {
+    const terminal = vscode.window.createTerminal({
+      name: `Clean ${solution.name}`,
+      cwd: solutionDir,
+      hideFromUser: false,
+    });
+
+    vscode.window.showInformationMessage(`Cleaning solution ${solution.name}...`);
+
+    // Show the terminal briefly
+    terminal.show(true);
+
+    // Use dotnet clean command - PowerShell compatible
+    const closeCommand = autoClose ? '; exit $LASTEXITCODE' : '';
+    terminal.sendText(`dotnet clean "${solution.path}"${closeCommand}`, true);
+
+    // Timeout after 60 seconds
+    const timeoutId = setTimeout(() => {
+      disposable.dispose();
+      vscode.window.showWarningMessage(`Clean timeout: ${solution.name}`);
+      resolve(); // Continue anyway
+    }, 60000);
+
+    // Wait for terminal to close (clean complete)
+    const disposable = vscode.window.onDidCloseTerminal(async closedTerminal => {
+      if (closedTerminal === terminal) {
+        clearTimeout(timeoutId);
+        disposable.dispose();
+
+        // Check if clean succeeded by looking at exit code
+        if (closedTerminal.exitStatus?.code === 0) {
+          vscode.window.showInformationMessage(`✓ Clean succeeded: ${solution.name}`);
+          resolve();
+        } else {
+          vscode.window.showErrorMessage(`Clean failed: ${solution.name}`);
+          reject(new Error('Clean failed'));
+        }
+      }
+    });
+  });
+}
+
+/**
  * Find the actual DLL path after build
  */
 function findBuiltDllPath(project: ProjectInfo): string | null {
@@ -349,6 +496,15 @@ export async function quickLaunch(): Promise<void> {
     project,
   }));
 
+  // Sort items to show last used project first
+  if (lastUsedItemPath) {
+    projectItems.sort((a, b) => {
+      if (a.project.path === lastUsedItemPath) return -1;
+      if (b.project.path === lastUsedItemPath) return 1;
+      return 0;
+    });
+  }
+
   const selectedProject = await vscode.window.showQuickPick(projectItems, {
     placeHolder: 'Select a project to debug',
     matchOnDescription: true,
@@ -360,6 +516,7 @@ export async function quickLaunch(): Promise<void> {
   }
 
   const project = selectedProject.project;
+  lastUsedItemPath = project.path;
   let profileName: string | undefined;
 
   // Step 2: If the project has launch profiles, show profile picker
@@ -420,36 +577,67 @@ export async function quickLaunch(): Promise<void> {
  */
 export async function quickBuild(): Promise<void> {
   const projects = await findRunnableProjects();
+  const solutions = await findSolutionFiles();
 
-  if (projects.length === 0) {
-    vscode.window.showWarningMessage('No runnable C# projects found in workspace');
+  if (projects.length === 0 && solutions.length === 0) {
+    vscode.window.showWarningMessage('No C# projects or solutions found in workspace');
     return;
   }
 
-  // Show project picker
-  interface ProjectQuickPickItem extends vscode.QuickPickItem {
-    project: ProjectInfo;
+  // Show picker with both projects and solutions
+  interface BuildableQuickPickItem extends vscode.QuickPickItem {
+    item: BuildableItem;
   }
 
-  const projectItems: ProjectQuickPickItem[] = projects.map(project => ({
-    label: `$(tools) ${project.name}`,
-    description: project.isWeb ? 'Web Application' : 'Console Application',
-    detail: `${project.targetFramework} • ${path.dirname(project.path)}`,
-    project,
-  }));
+  const items: BuildableQuickPickItem[] = [];
 
-  const selectedProject = await vscode.window.showQuickPick(projectItems, {
-    placeHolder: 'Select a project to build',
+  // Add solutions first
+  for (const solution of solutions) {
+    items.push({
+      label: `$(folder) ${solution.name}`,
+      description: 'Solution',
+      detail: `${solution.projectCount} project(s) • ${path.dirname(solution.path)}`,
+      item: solution,
+    });
+  }
+
+  // Add projects
+  for (const project of projects) {
+    items.push({
+      label: `$(tools) ${project.name}`,
+      description: project.isWeb ? 'Web Application' : 'Console Application',
+      detail: `${project.targetFramework} • ${path.dirname(project.path)}`,
+      item: project,
+    });
+  }
+
+  // Sort items to show last used item first
+  if (lastUsedItemPath) {
+    items.sort((a, b) => {
+      if (a.item.path === lastUsedItemPath) return -1;
+      if (b.item.path === lastUsedItemPath) return 1;
+      return 0;
+    });
+  }
+
+  const selected = await vscode.window.showQuickPick(items, {
+    placeHolder: 'Select a project or solution to build',
     matchOnDescription: true,
     matchOnDetail: true,
   });
 
-  if (!selectedProject) {
+  if (!selected) {
     return;
   }
 
-  // Build the project
-  await buildProject(selectedProject.project);
+  lastUsedItemPath = selected.item.path;
+
+  // Build based on type
+  if (isSolution(selected.item)) {
+    await buildSolution(selected.item);
+  } else {
+    await buildProject(selected.item);
+  }
 }
 
 /**
@@ -457,36 +645,67 @@ export async function quickBuild(): Promise<void> {
  */
 export async function quickClean(): Promise<void> {
   const projects = await findRunnableProjects();
+  const solutions = await findSolutionFiles();
 
-  if (projects.length === 0) {
-    vscode.window.showWarningMessage('No runnable C# projects found in workspace');
+  if (projects.length === 0 && solutions.length === 0) {
+    vscode.window.showWarningMessage('No C# projects or solutions found in workspace');
     return;
   }
 
-  // Show project picker
-  interface ProjectQuickPickItem extends vscode.QuickPickItem {
-    project: ProjectInfo;
+  // Show picker with both projects and solutions
+  interface BuildableQuickPickItem extends vscode.QuickPickItem {
+    item: BuildableItem;
   }
 
-  const projectItems: ProjectQuickPickItem[] = projects.map(project => ({
-    label: `$(trash) ${project.name}`,
-    description: project.isWeb ? 'Web Application' : 'Console Application',
-    detail: `${project.targetFramework} • ${path.dirname(project.path)}`,
-    project,
-  }));
+  const items: BuildableQuickPickItem[] = [];
 
-  const selectedProject = await vscode.window.showQuickPick(projectItems, {
-    placeHolder: 'Select a project to clean',
+  // Add solutions first
+  for (const solution of solutions) {
+    items.push({
+      label: `$(folder) ${solution.name}`,
+      description: 'Solution',
+      detail: `${solution.projectCount} project(s) • ${path.dirname(solution.path)}`,
+      item: solution,
+    });
+  }
+
+  // Add projects
+  for (const project of projects) {
+    items.push({
+      label: `$(trash) ${project.name}`,
+      description: project.isWeb ? 'Web Application' : 'Console Application',
+      detail: `${project.targetFramework} • ${path.dirname(project.path)}`,
+      item: project,
+    });
+  }
+
+  // Sort items to show last used item first
+  if (lastUsedItemPath) {
+    items.sort((a, b) => {
+      if (a.item.path === lastUsedItemPath) return -1;
+      if (b.item.path === lastUsedItemPath) return 1;
+      return 0;
+    });
+  }
+
+  const selected = await vscode.window.showQuickPick(items, {
+    placeHolder: 'Select a project or solution to clean',
     matchOnDescription: true,
     matchOnDetail: true,
   });
 
-  if (!selectedProject) {
+  if (!selected) {
     return;
   }
 
-  // Clean the project
-  await cleanProject(selectedProject.project);
+  lastUsedItemPath = selected.item.path;
+
+  // Clean based on type
+  if (isSolution(selected.item)) {
+    await cleanSolution(selected.item);
+  } else {
+    await cleanProject(selected.item);
+  }
 }
 
 /**
@@ -494,49 +713,77 @@ export async function quickClean(): Promise<void> {
  */
 export async function quickRebuild(): Promise<void> {
   const projects = await findRunnableProjects();
+  const solutions = await findSolutionFiles();
 
-  if (projects.length === 0) {
-    vscode.window.showWarningMessage('No runnable C# projects found in workspace');
+  if (projects.length === 0 && solutions.length === 0) {
+    vscode.window.showWarningMessage('No C# projects or solutions found in workspace');
     return;
   }
 
-  // Show project picker
-  interface ProjectQuickPickItem extends vscode.QuickPickItem {
-    project: ProjectInfo;
+  // Show picker with both projects and solutions
+  interface BuildableQuickPickItem extends vscode.QuickPickItem {
+    item: BuildableItem;
   }
 
-  const projectItems: ProjectQuickPickItem[] = projects.map(project => ({
-    label: `$(sync) ${project.name}`,
-    description: project.isWeb ? 'Web Application' : 'Console Application',
-    detail: `${project.targetFramework} • ${path.dirname(project.path)}`,
-    project,
-  }));
+  const items: BuildableQuickPickItem[] = [];
 
-  const selectedProject = await vscode.window.showQuickPick(projectItems, {
-    placeHolder: 'Select a project to rebuild',
+  // Add solutions first
+  for (const solution of solutions) {
+    items.push({
+      label: `$(folder) ${solution.name}`,
+      description: 'Solution',
+      detail: `${solution.projectCount} project(s) • ${path.dirname(solution.path)}`,
+      item: solution,
+    });
+  }
+
+  // Add projects
+  for (const project of projects) {
+    items.push({
+      label: `$(sync) ${project.name}`,
+      description: project.isWeb ? 'Web Application' : 'Console Application',
+      detail: `${project.targetFramework} • ${path.dirname(project.path)}`,
+      item: project,
+    });
+  }
+
+  // Sort items to show last used item first
+  if (lastUsedItemPath) {
+    items.sort((a, b) => {
+      if (a.item.path === lastUsedItemPath) return -1;
+      if (b.item.path === lastUsedItemPath) return 1;
+      return 0;
+    });
+  }
+
+  const selected = await vscode.window.showQuickPick(items, {
+    placeHolder: 'Select a project or solution to rebuild',
     matchOnDescription: true,
     matchOnDetail: true,
   });
 
-  if (!selectedProject) {
+  if (!selected) {
     return;
   }
 
-  const project = selectedProject.project;
-  const projectDir = path.dirname(project.path);
+  const item = selected.item;
+  lastUsedItemPath = item.path;
+  const itemPath = item.path;
+  const itemDir = path.dirname(itemPath);
+  const itemName = item.name;
 
   // Chain clean and build in one terminal (keep terminal open)
   const terminal = vscode.window.createTerminal({
-    name: `Rebuild ${project.name}`,
-    cwd: projectDir,
+    name: `Rebuild ${itemName}`,
+    cwd: itemDir,
     hideFromUser: false,
   });
 
-  vscode.window.showInformationMessage(`Rebuilding ${project.name}...`);
+  vscode.window.showInformationMessage(`Rebuilding ${itemName}...`);
   terminal.show(true);
 
   // Chain the commands together (terminal stays open)
-  terminal.sendText(`dotnet clean "${project.path}"; dotnet build "${project.path}"`);
+  terminal.sendText(`dotnet clean "${itemPath}"; dotnet build "${itemPath}"`);
 }
 
 /**

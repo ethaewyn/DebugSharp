@@ -6,9 +6,9 @@ Enhanced C# debugging experience with inline evaluation, IntelliSense-powered ex
 
 - **NuGet Package Manager** - Right-click any `.csproj` file to manage NuGet packages with a rich UI
 - **Quick Launch** - Press `Ctrl+F5` to instantly debug any C# project in your workspace
-- **Quick Build** - Press `Ctrl+Shift+B` to build any project without running
-- **Quick Clean** - Press `Ctrl+Shift+K` to clean any project's build artifacts
-- **Quick Rebuild** - Press `Ctrl+Shift+R` to clean and rebuild any project
+- **Quick Build** - Press `Ctrl+Shift+B` to build any project or solution without running
+- **Quick Clean** - Press `Ctrl+Shift+K` to clean any project or solution's build artifacts
+- **Quick Rebuild** - Press `Ctrl+Shift+R` to clean and rebuild any project or solution
 - **Smart Debug Configuration** - Auto-detect projects, launch profiles, and generate configurations
 - **IntelliSense Expression Evaluator**: Edit C# expressions with full IntelliSense (types + variables) and send to Debug Console
 - **JSON Object Viewer**: View complex objects as formatted JSON in a dedicated panel
@@ -54,8 +54,8 @@ Enhanced C# debugging experience with inline evaluation, IntelliSense-powered ex
 **Quick Build** - Build without running:
 
 1. Press `Ctrl+Shift+B` (Mac: `Cmd+Shift+B`) or run command "Quick Build Project"
-2. Select your project from the list
-3. Project builds and shows progress in terminal
+2. Select your project or solution from the list (last used appears first)
+3. Build runs and shows progress in terminal
 
 **Quick Clean** - Clean build artifacts:
 
