@@ -26,6 +26,7 @@ import {
   generateLaunchConfigurations,
 } from './debug/launcher';
 import { registerVariableCompletionProvider, updateDebugContext } from './ui/completionProvider';
+import { showNugetPackageManager, initializeNugetPanel } from './ui/panels/nugetManager';
 
 /**
  * Clean up any orphaned .vscode-debug-eval.cs files from previous sessions
@@ -87,6 +88,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Initialize webview modules with context
   initializeWebview(context);
   initializeEvaluationPanel(context);
+  initializeNugetPanel(context);
 
   // Clean up any leftover temp files from previous sessions
   await cleanupOrphanedTempFiles();
@@ -223,6 +225,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   );
 
+  // Command: Manage NuGet packages
+  const manageNugetCommand = vscode.commands.registerCommand(
+    'csharpDebugHints.manageNugetPackages',
+    async (uri: vscode.Uri) => {
+      if (uri && uri.fsPath) {
+        await showNugetPackageManager(uri.fsPath);
+      } else {
+        vscode.window.showErrorMessage('No .csproj file selected');
+      }
+    },
+  );
+
   // Debug session lifecycle listeners
   const listeners = [
     vscode.debug.onDidChangeActiveDebugSession(session => {
@@ -257,6 +271,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     quickCleanCommand,
     quickRebuildCommand,
     generateLaunchCommand,
+    manageNugetCommand,
     ...listeners,
   );
 }

@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NuGet Package Manager</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: var(--vscode-font-family);
+        color: var(--vscode-foreground);
+        background-color: var(--vscode-editor-background);
+        padding: 20px;
+        font-size: var(--vscode-font-size);
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+
+      h1 {
+        color: var(--vscode-foreground);
+        margin-bottom: 20px;
+        font-size: 24px;
+      }
+
+      h2 {
+        color: var(--vscode-foreground);
+        margin-top: 30px;
+        margin-bottom: 15px;
+        font-size: 18px;
+        border-bottom: 1px solid var(--vscode-panel-border);
+        padding-bottom: 8px;
+      }
+
+      .search-container {
+        margin-bottom: 30px;
+      }
+
+      .search-box {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+      }
+
+      input[type='text'] {
+        flex: 1;
+        padding: 8px 12px;
+        background-color: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+        border: 1px solid var(--vscode-input-border);
+        border-radius: 2px;
+        font-size: 14px;
+      }
+
+      input[type='text']:focus {
+        outline: 1px solid var(--vscode-focusBorder);
+      }
+
+      button {
+        padding: 8px 16px;
+        background-color: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
+        border: none;
+        border-radius: 2px;
+        cursor: pointer;
+        font-size: 14px;
+      }
+
+      button:hover {
+        background-color: var(--vscode-button-hoverBackground);
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      button.secondary {
+        background-color: var(--vscode-button-secondaryBackground);
+        color: var(--vscode-button-secondaryForeground);
+      }
+
+      button.secondary:hover {
+        background-color: var(--vscode-button-secondaryHoverBackground);
+      }
+
+      .package-list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .package-item {
+        background-color: var(--vscode-editor-inactiveSelectionBackground);
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 4px;
+        padding: 15px;
+        transition: background-color 0.2s;
+      }
+
+      .package-item:hover {
+        background-color: var(--vscode-list-hoverBackground);
+      }
+
+      .package-item.installed {
+        border-left: 3px solid var(--vscode-charts-green);
+      }
+      .package-item.transitive {
+        border-left: 3px solid var(--vscode-charts-blue);
+        opacity: 0.85;
+      }
+      .package-item.transitive {
+        border-left: 3px solid var(--vscode-charts-blue);
+        opacity: 0.85;
+      }
+
+      .package-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 10px;
+      }
+
+      .package-info {
+        flex: 1;
+      }
+
+      .package-name {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--vscode-textLink-foreground);
+        margin-bottom: 5px;
+      }
+
+      .package-name .badge {
+        display: inline-block;
+        background-color: var(--vscode-charts-green);
+        color: white;
+        font-size: 11px;
+        padding: 2px 6px;
+        border-radius: 3px;
+        margin-left: 8px;
+        font-weight: normal;
+      }
+
+      .package-name .badge.transitive {
+        background-color: var(--vscode-charts-blue);
+      }
+
+      .package-version {
+        font-size: 13px;
+        color: var(--vscode-descriptionForeground);
+        margin-bottom: 5px;
+      }
+
+      .package-description {
+        font-size: 13px;
+        color: var(--vscode-foreground);
+        opacity: 0.9;
+        line-height: 1.5;
+      }
+
+      .package-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .package-actions button {
+        padding: 6px 12px;
+        font-size: 13px;
+      }
+
+      .version-selector {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid var(--vscode-panel-border);
+      }
+
+      .version-selector-header {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+
+      select {
+        padding: 6px 10px;
+        background-color: var(--vscode-dropdown-background);
+        color: var(--vscode-dropdown-foreground);
+        border: 1px solid var(--vscode-dropdown-border);
+        border-radius: 2px;
+        font-size: 13px;
+        min-width: 200px;
+      }
+
+      select:focus {
+        outline: 1px solid var(--vscode-focusBorder);
+      }
+
+      .dependencies {
+        margin-top: 10px;
+        padding: 10px;
+        background-color: var(--vscode-editor-background);
+        border-radius: 3px;
+        font-size: 12px;
+      }
+
+      .dependencies-title {
+        font-weight: 600;
+        margin-bottom: 8px;
+        color: var(--vscode-foreground);
+      }
+
+      .dependency-item {
+        padding: 4px 0;
+        color: var(--vscode-descriptionForeground);
+      }
+
+      .dependency-item .dep-name {
+        color: var(--vscode-textLink-foreground);
+      }
+
+      .empty-state {
+        text-align: center;
+        padding: 40px 20px;
+        color: var(--vscode-descriptionForeground);
+      }
+
+      .loading {
+        text-align: center;
+        padding: 20px;
+        color: var(--vscode-descriptionForeground);
+      }
+
+      .stats {
+        display: flex;
+        gap: 15px;
+        margin-top: 5px;
+        font-size: 12px;
+        color: var(--vscode-descriptionForeground);
+      }
+
+      .stat-item {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .error-message {
+        background-color: var(--vscode-inputValidation-errorBackground);
+        border: 1px solid var(--vscode-inputValidation-errorBorder);
+        color: var(--vscode-inputValidation-errorForeground);
+        padding: 10px;
+        border-radius: 3px;
+        margin-bottom: 15px;
+      }
+
+      .toggle-container {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 15px;
+      }
+
+      .toggle-container label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+
+      .toggle-container input[type='checkbox'] {
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>NuGet Package Manager</h1>
+
+      <div class="search-container">
+        <div class="search-box">
+          <input type="text" id="searchInput" placeholder="Search NuGet packages..." />
+          <button id="searchBtn">Search</button>
+        </div>
+        <div id="searchResults" class="package-list"></div>
+      </div>
+
+      <h2>Installed Packages (<span id="installedCount">0</span>)</h2>
+      <div class="toggle-container">
+        <label>
+          <input type="checkbox" id="showAllPackages" />
+          Show all packages (including transitive dependencies)
+        </label>
+      </div>
+      <div id="installedPackages" class="package-list"></div>
+    </div>
+
+    <script>
+      const vscode = acquireVsCodeApi();
+      const searchInput = document.getElementById('searchInput');
+      const searchBtn = document.getElementById('searchBtn');
+      const searchResults = document.getElementById('searchResults');
+      const installedPackages = document.getElementById('installedPackages');
+      const installedCount = document.getElementById('installedCount');
+
+      const installed = {{INSTALLED_PACKAGES}};
+      const packageVersions = new Map();
+      const packageDependencies = new Map();
+
+      // Display installed packages
+      function displayInstalledPackages() {
+          installedCount.textContent = installed.length;
+
+          if (installed.length === 0) {
+              installedPackages.innerHTML = '<div class="empty-state">No packages installed</div>';
+              return;
+          }
+
+          installedPackages.innerHTML = '';
+          installed.forEach(pkg => {
+              const item = createPackageItem(pkg, true);
+              installedPackages.appendChild(item);
+          });
+      }
+
+      // Create package item element
+      function createPackageItem(pkg, isInstalled) {
+          const div = document.createElement('div');
+          const isTransitive = pkg.isTransitive === true;
+          div.className = 'package-item' + (isInstalled ? (isTransitive ? ' transitive' : ' installed') : '');
+          div.setAttribute('data-package-id', pkg.id);
+
+          const badge = isTransitive
+              ? '<span class="badge transitive">TRANSITIVE</span>'
+              : (isInstalled ? '<span class="badge">INSTALLED</span>' : '');
+
+          const versionInfo = isInstalled
+              ? `<div class="package-version">${isTransitive ? 'Transitive' : 'Installed'}: ${pkg.version || pkg.installedVersion}</div>`
+              : `<div class="package-version">Latest: ${pkg.version}</div>`;
+
+        div.innerHTML = `
+            <div class="package-header">
+                <div class="package-info">
+                    <div class="package-name">${pkg.id}${badge}</div>
+                    ${versionInfo}
+                    <div class="package-description">${pkg.description || 'No description available'}</div>
+                    ${pkg.authors ? `<div class="stats"><div class="stat-item">By: ${pkg.authors}</div></div>` : ''}
+                </div>
+                <div class="package-actions">
+                    ${createActionButtons(pkg, isInstalled, isTransitive)}
+                </div>
+            </div>
+            <div class="dependencies" data-deps-for="${pkg.id}" style="display: none;"></div>
+            <div class="version-selector hidden" data-selector-for="${pkg.id}">
+                <div class="version-selector-header">
+                    <select data-version-select="${pkg.id}">
+                        <option value="">Loading versions...</option>
+                    </select>
+                    <button onclick="showDependencies('${pkg.id}')">Show Dependencies</button>
+                </div>
+                <div class="dependencies hidden" data-deps-for="${pkg.id}-selector"></div>
+            </div>
+        `;
+
+          return div;
+      }
+
+      // Create action buttons based on installation status
+      function createActionButtons(pkg, isInstalled, isTransitive) {
+          if (isTransitive) {
+              // Transitive packages can't be directly managed
+              return '<button class="secondary" disabled>Transitive Dependency</button>';
+          }
+          if (isInstalled) {
+              return `
+                  <button class="secondary" onclick="toggleVersionSelector('${pkg.id}')">Change Version</button>
+                  <button onclick="uninstallPackage('${pkg.id}')">Uninstall</button>
+              `;
+          } else {
+              return `
+                  <button onclick="toggleVersionSelector('${pkg.id}')">Install</button>
+              `;
+          }
+      }
+
+      // Toggle version selector visibility
+      window.toggleVersionSelector = function(packageId) {
+          const selector = document.querySelector(`[data-selector-for="${packageId}"]`);
+          if (selector.classList.contains('hidden')) {
+              selector.classList.remove('hidden');
+              loadVersions(packageId);
+          } else {
+              selector.classList.add('hidden');
+          }
+      };
+
+      // Load versions for a package
+      function loadVersions(packageId) {
+          if (packageVersions.has(packageId)) {
+              populateVersionSelect(packageId, packageVersions.get(packageId));
+              return;
+          }
+
+          vscode.postMessage({
+              command: 'getVersions',
+              packageId: packageId
+          });
+      }
+
+      // Populate version select dropdown
+      function populateVersionSelect(packageId, versions) {
+          const select = document.querySelector(`[data-version-select="${packageId}"]`);
+          if (!select) return;
+
+          select.innerHTML = versions.map(v =>
+              `<option value="${v}">${v}</option>`
+          ).join('');
+
+          // Add install/update button
+          const existingBtn = select.parentElement.querySelector('.version-action-btn');
+          if (!existingBtn) {
+              const btn = document.createElement('button');
+              btn.className = 'version-action-btn';
+              btn.textContent = 'Install Selected Version';
+              btn.onclick = () => installVersion(packageId);
+              select.parentElement.appendChild(btn);
+          }
+      }
+
+      // Show dependencies for a version
+      window.showDependencies = function(packageId) {
+          const select = document.querySelector(`[data-version-select="${packageId}"]`);
+          const version = select?.value;
+          if (!version) return;
+
+          const key = `${packageId}@${version}`;
+          if (packageDependencies.has(key)) {
+              displayDependencies(packageId, version, packageDependencies.get(key), true);
+              return;
+          }
+
+          vscode.postMessage({
+              command: 'getDependencies',
+              packageId: packageId,
+              version: version
+          });
+      };
+
+      // Load dependencies for an installed package
+      function loadDependenciesForInstalled(packageId, version) {
+          const key = `${packageId}@${version}`;
+          if (packageDependencies.has(key)) {
+              displayDependencies(packageId, version, packageDependencies.get(key), false);
+              return;
+          }
+
+          vscode.postMessage({
+              command: 'getDependencies',
+              packageId: packageId,
+              version: version
+          });
+      }
+
+      // Display dependencies
+      function displayDependencies(packageId, version, dependencies, isSelector) {
+          const selector = isSelector ? '-selector' : '';
+          const depsDiv = document.querySelector(`[data-deps-for="${packageId}${selector}"]`);
+          if (!depsDiv) return;
+
+          if (dependencies.length === 0) {
+              depsDiv.innerHTML = '<div class="dependencies-title">No dependencies</div>';
+          } else {
+              depsDiv.innerHTML = `
+                  <div class="dependencies-title">Dependencies for ${version}:</div>
+                  ${dependencies.map(dep => `
+                      <div class="dependency-item">
+                          <span class="dep-name">${dep.id}</span> ${dep.version}
+                          ${dep.targetFramework ? ` (${dep.targetFramework})` : ''}
+                      </div>
+                  `).join('')}
+              `;
+          }
+          depsDiv.classList.remove('hidden');
+      }
+
+      // Install a specific version
+      function installVersion(packageId) {
+          const select = document.querySelector(`[data-version-select="${packageId}"]`);
+          const version = select?.value;
+          if (!version) return;
+
+          vscode.postMessage({
+              command: 'install',
+              packageId: packageId,
+              version: version
+          });
+      }
+
+      // Uninstall a package
+      window.uninstallPackage = function(packageId) {
+          vscode.postMessage({
+              command: 'uninstall',
+              packageId: packageId
+          });
+      };
+
+      // Search packages
+      function searchPackages() {
+          const query = searchInput.value.trim();
+          if (!query) return;
+
+          searchResults.innerHTML = '<div class="loading">Searching...</div>';
+
+          vscode.postMessage({
+              command: 'search',
+              query: query
+          });
+      }
+
+      // Event listeners
+      searchBtn.addEventListener('click', searchPackages);
+      searchInput.addEventListener('keypress', (e) => {
+          if (e.key === 'Enter') {
+              searchPackages();
+          }
+      });
+
+      // Handle messages from extension
+      window.addEventListener('message', event => {
+          const message = event.data;
+
+          switch (message.command) {
+              case 'searchResults':
+                  displaySearchResults(message.results);
+                  break;
+              case 'versionsResult':
+                  packageVersions.set(message.packageId, message.versions);
+                  populateVersionSelect(message.packageId, message.versions);
+                  break;
+              case 'dependenciesResult':
+                  const key = `${message.packageId}@${message.version}`;
+                  packageDependencies.set(key, message.dependencies);
+                  // Try to display in both locations
+                  displayDependencies(message.packageId, message.version, message.dependencies, false);
+                  displayDependencies(message.packageId, message.version, message.dependencies, true);
+                  break;
+          }
+      });
+
+      // Display search results
+      function displaySearchResults(results) {
+          if (results.length === 0) {
+              searchResults.innerHTML = '<div class="empty-state">No packages found</div>';
+              return;
+          }
+
+          searchResults.innerHTML = '';
+          results.forEach(pkg => {
+              const item = createPackageItem(pkg, pkg.isInstalled);
+              searchResults.appendChild(item);
+          });
+      }
+
+      // Toggle showing all packages event listener
+      document.getElementById('showAllPackages').addEventListener('change', (e) => {
+            const showAll = e.target.checked;
+            vscode.postMessage({
+                command: 'toggleAllPackages',
+                showAll: showAll
+            });
+
+            // Show/hide dependencies for installed packages
+            const installedItems = document.querySelectorAll('.package-item.installed:not(.transitive)');
+            installedItems.forEach(item => {
+                const packageId = item.getAttribute('data-package-id');
+                const depsDiv = item.querySelector(`[data-deps-for="${packageId}"]`);
+                if (depsDiv) {
+                    if (showAll) {
+                        depsDiv.style.display = 'block';
+                        // Load dependencies if not already loaded
+                        const pkg = installed.find(p => p.id === packageId);
+                        if (pkg && depsDiv.innerHTML === '') {
+                            depsDiv.innerHTML = '<div class="loading">Loading dependencies...</div>';
+                            loadDependenciesForInstalled(packageId, pkg.version);
+                        }
+                    } else {
+                        depsDiv.style.display = 'none';
+                    }
+                }
+            });
+      });
+
+      // Initialize
+      displayInstalledPackages();
+    </script>
+  </body>
+</html>

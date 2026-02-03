@@ -79,9 +79,21 @@
         "command": "csharpDebugHints.generateLaunchConfig",
         "title": "Generate Debug Configurations",
         "category": "C# Debug Hints"
+      },
+      {
+        "command": "csharpDebugHints.manageNugetPackages",
+        "title": "Manage NuGet Packages",
+        "category": "C# Debug Hints"
       }
     ],
     "menus": {
+      "explorer/context": [
+        {
+          "command": "csharpDebugHints.manageNugetPackages",
+          "when": "resourceExtname == .csproj",
+          "group": "nuget@1"
+        }
+      ],
       "editor/context": [
         {
           "command": "csharpDebugHints.evaluateExpression",
@@ -136,8 +148,12 @@
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@types/vscode": "^1.108.1",
+    "@types/xml2js": "^0.4.14",
     "@vscode/vsce": "^3.7.1",
     "prettier": "^3.8.1",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "xml2js": "^0.6.2"
   }
 }

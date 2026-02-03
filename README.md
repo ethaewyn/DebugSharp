@@ -4,6 +4,7 @@ Enhanced C# debugging experience with inline evaluation, IntelliSense-powered ex
 
 ## Features
 
+- **NuGet Package Manager** - Right-click any `.csproj` file to manage NuGet packages with a rich UI
 - **Quick Launch** - Press `Ctrl+F5` to instantly debug any C# project in your workspace
 - **Quick Build** - Press `Ctrl+Shift+B` to build any project without running
 - **Quick Clean** - Press `Ctrl+Shift+K` to clean any project's build artifacts
@@ -15,6 +16,31 @@ Enhanced C# debugging experience with inline evaluation, IntelliSense-powered ex
 - **Seamless Lambda Support**: Automatically uses Debug Console context for lambda expressions
 
 ## Usage
+
+### NuGet Package Manager
+
+**Manage NuGet packages visually:**
+
+1. In the Explorer, right-click on any `.csproj` file
+2. Select "Manage NuGet Packages"
+3. A dedicated tab opens with:
+   - **Installed Packages** section showing all currently installed packages with version numbers
+   - **Search** functionality to find packages from nuget.org
+   - For each package:
+     - Install/Uninstall buttons
+     - Version picker to select specific versions
+     - Dependencies viewer showing package dependencies per version
+     - Visual distinction between installed and available packages
+
+**Features:**
+
+- ✅ Search NuGet packages directly from nuget.org
+- ✅ View all installed packages with their versions
+- ✅ Install, update, or remove packages with a single click
+- ✅ Select specific package versions from a dropdown
+- ✅ View package dependencies for each version
+- ✅ Visual indicators for installed packages (green border + badge)
+- ✅ Automatically modifies your `.csproj` file
 
 ### Quick Launch & Build Commands
 
@@ -78,6 +104,7 @@ All commands work with:
 - **`Ctrl+Shift+B`** (Mac: `Cmd+Shift+B`) - Quick build project
 - **`Ctrl+Shift+K`** (Mac: `Cmd+Shift+K`) - Quick clean project
 - **`Ctrl+Shift+R`** (Mac: `Cmd+Shift+R`) - Quick rebuild project
+- **Right-click `.csproj`** - Manage NuGet Packages
 
 ### Debugging
 
@@ -117,6 +144,7 @@ Automatically create launch.json entries for all projects:
 - `C# Debug Hints: Quick Clean Project` - **`Ctrl+Shift+K`** - Clean any project
 - `C# Debug Hints: Quick Rebuild Project` - **`Ctrl+Shift+R`** - Clean and rebuild any project
 - `C# Debug Hints: Generate Debug Configurations` - Auto-generate launch.json for all projects
+- `C# Debug Hints: Manage NuGet Packages` - Visual NuGet package management (right-click `.csproj`)
 
 ### Debugging
 
