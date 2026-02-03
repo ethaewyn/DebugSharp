@@ -106,7 +106,10 @@ async function analyzeProject(projectPath: string): Promise<ProjectInfo | null> 
 /**
  * Clean a project using dotnet clean
  */
-export async function cleanProject(project: ProjectInfo): Promise<void> {
+export async function cleanProject(
+  project: ProjectInfo,
+  autoClose: boolean = false,
+): Promise<void> {
   const projectDir = path.dirname(project.path);
 
   return new Promise<void>((resolve, reject) => {
@@ -122,7 +125,8 @@ export async function cleanProject(project: ProjectInfo): Promise<void> {
     terminal.show(true);
 
     // Use dotnet clean command - PowerShell compatible
-    terminal.sendText(`dotnet clean "${project.path}"`, true);
+    const closeCommand = autoClose ? '; exit $LASTEXITCODE' : '';
+    terminal.sendText(`dotnet clean "${project.path}"${closeCommand}`, true);
 
     // Timeout after 60 seconds
     const timeoutId = setTimeout(() => {
@@ -153,7 +157,10 @@ export async function cleanProject(project: ProjectInfo): Promise<void> {
 /**
  * Build a project using dotnet build
  */
-export async function buildProject(project: ProjectInfo): Promise<void> {
+export async function buildProject(
+  project: ProjectInfo,
+  autoClose: boolean = false,
+): Promise<void> {
   const projectDir = path.dirname(project.path);
 
   return new Promise<void>((resolve, reject) => {
@@ -169,7 +176,8 @@ export async function buildProject(project: ProjectInfo): Promise<void> {
     terminal.show(true);
 
     // Use dotnet build command - PowerShell compatible
-    terminal.sendText(`dotnet build "${project.path}"`, true);
+    const closeCommand = autoClose ? '; exit $LASTEXITCODE' : '';
+    terminal.sendText(`dotnet build "${project.path}"${closeCommand}`, true);
 
     // Timeout after 60 seconds
     const timeoutId = setTimeout(() => {
@@ -388,8 +396,8 @@ export async function quickLaunch(): Promise<void> {
     }
   }
 
-  // Build the project first
-  await buildProject(project);
+  // Build the project first (auto-close terminal for seamless launch)
+  await buildProject(project, true);
 
   // Find the actual DLL path after build
   const dllPath = findBuiltDllPath(project);
@@ -517,7 +525,7 @@ export async function quickRebuild(): Promise<void> {
   const project = selectedProject.project;
   const projectDir = path.dirname(project.path);
 
-  // Chain clean and build in one terminal
+  // Chain clean and build in one terminal (keep terminal open)
   const terminal = vscode.window.createTerminal({
     name: `Rebuild ${project.name}`,
     cwd: projectDir,
@@ -527,7 +535,7 @@ export async function quickRebuild(): Promise<void> {
   vscode.window.showInformationMessage(`Rebuilding ${project.name}...`);
   terminal.show(true);
 
-  // Chain the commands together
+  // Chain the commands together (terminal stays open)
   terminal.sendText(`dotnet clean "${project.path}"; dotnet build "${project.path}"`);
 }
 
