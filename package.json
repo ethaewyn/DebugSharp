@@ -76,6 +76,12 @@
         "icon": "$(sync)"
       },
       {
+        "command": "csharpDebugHints.quickTest",
+        "title": "Quick Test Project",
+        "category": "C# Debug Hints",
+        "icon": "$(beaker)"
+      },
+      {
         "command": "csharpDebugHints.generateLaunchConfig",
         "title": "Generate Debug Configurations",
         "category": "C# Debug Hints"
@@ -122,8 +128,8 @@
       },
       {
         "command": "csharpDebugHints.quickLaunch",
-        "key": "ctrl+f5",
-        "mac": "cmd+f5"
+        "key": "ctrl+shift+f5",
+        "mac": "cmd+shift+f5"
       },
       {
         "command": "csharpDebugHints.quickBuild",
@@ -139,6 +145,11 @@
         "command": "csharpDebugHints.quickRebuild",
         "key": "ctrl+shift+r",
         "mac": "cmd+shift+r"
+      },
+      {
+        "command": "csharpDebugHints.quickTest",
+        "key": "ctrl+shift+t",
+        "mac": "cmd+shift+t"
       }
     ]
   },

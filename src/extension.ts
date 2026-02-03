@@ -23,6 +23,7 @@ import {
   quickBuild,
   quickClean,
   quickRebuild,
+  quickTest,
   generateLaunchConfigurations,
 } from './debug/launcher';
 import { registerVariableCompletionProvider, updateDebugContext } from './ui/completionProvider';
@@ -217,6 +218,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   );
 
+  // Command: Quick test
+  const quickTestCommand = vscode.commands.registerCommand(
+    'csharpDebugHints.quickTest',
+    async () => {
+      await quickTest();
+    },
+  );
+
   // Command: Generate launch configurations
   const generateLaunchCommand = vscode.commands.registerCommand(
     'csharpDebugHints.generateLaunchConfigurations',
@@ -270,6 +279,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     quickBuildCommand,
     quickCleanCommand,
     quickRebuildCommand,
+    quickTestCommand,
     generateLaunchCommand,
     manageNugetCommand,
     ...listeners,

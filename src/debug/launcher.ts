@@ -81,6 +81,42 @@ export async function findSolutionFiles(): Promise<SolutionInfo[]> {
 }
 
 /**
+ * Find all test projects in the workspace
+ */
+export async function findTestProjects(): Promise<ProjectInfo[]> {
+  const testProjects: ProjectInfo[] = [];
+  const csprojFiles = await vscode.workspace.findFiles('**/*.csproj', '**/node_modules/**');
+
+  for (const uri of csprojFiles) {
+    const projectPath = uri.fsPath;
+    const projectInfo = await analyzeProject(projectPath);
+
+    if (projectInfo) {
+      // Check if project has test framework references
+      try {
+        const content = fs.readFileSync(projectPath, 'utf8');
+        const hasTestFramework =
+          content.includes('Microsoft.NET.Test.Sdk') ||
+          content.includes('xunit') ||
+          content.includes('NUnit') ||
+          content.includes('MSTest') ||
+          content.includes('nunit') ||
+          content.includes('MSTest.TestFramework') ||
+          content.includes('MSTest.TestAdapter');
+
+        if (hasTestFramework) {
+          testProjects.push(projectInfo);
+        }
+      } catch {
+        // Skip if we can't read the file
+      }
+    }
+  }
+
+  return testProjects;
+}
+
+/**
  * Analyze a .csproj file to determine project type and configuration
  */
 async function analyzeProject(projectPath: string): Promise<ProjectInfo | null> {
@@ -346,6 +382,105 @@ export async function cleanSolution(
         } else {
           vscode.window.showErrorMessage(`Clean failed: ${solution.name}`);
           reject(new Error('Clean failed'));
+        }
+      }
+    });
+  });
+}
+
+/**
+ * Test a project using dotnet test
+ */
+export async function testProject(project: ProjectInfo, autoClose: boolean = false): Promise<void> {
+  const projectDir = path.dirname(project.path);
+
+  return new Promise<void>((resolve, reject) => {
+    const terminal = vscode.window.createTerminal({
+      name: `Test ${project.name}`,
+      cwd: projectDir,
+      hideFromUser: false,
+    });
+
+    vscode.window.showInformationMessage(`Testing ${project.name}...`);
+
+    // Show the terminal briefly
+    terminal.show(true);
+
+    // Use dotnet test command - PowerShell compatible
+    const closeCommand = autoClose ? '; exit $LASTEXITCODE' : '';
+    terminal.sendText(`dotnet test "${project.path}"${closeCommand}`, true);
+
+    // Timeout after 120 seconds (tests may take longer)
+    const timeoutId = setTimeout(() => {
+      disposable.dispose();
+      vscode.window.showWarningMessage(`Test timeout: ${project.name}`);
+      resolve(); // Continue anyway
+    }, 120000);
+
+    // Wait for terminal to close (test complete)
+    const disposable = vscode.window.onDidCloseTerminal(async closedTerminal => {
+      if (closedTerminal === terminal) {
+        clearTimeout(timeoutId);
+        disposable.dispose();
+
+        // Check if test succeeded by looking at exit code
+        if (closedTerminal.exitStatus?.code === 0) {
+          vscode.window.showInformationMessage(`✓ Tests passed: ${project.name}`);
+          resolve();
+        } else {
+          vscode.window.showErrorMessage(`Tests failed: ${project.name}`);
+          reject(new Error('Tests failed'));
+        }
+      }
+    });
+  });
+}
+
+/**
+ * Test a solution using dotnet test
+ */
+export async function testSolution(
+  solution: SolutionInfo,
+  autoClose: boolean = false,
+): Promise<void> {
+  const solutionDir = path.dirname(solution.path);
+
+  return new Promise<void>((resolve, reject) => {
+    const terminal = vscode.window.createTerminal({
+      name: `Test ${solution.name}`,
+      cwd: solutionDir,
+      hideFromUser: false,
+    });
+
+    vscode.window.showInformationMessage(`Testing solution ${solution.name}...`);
+
+    // Show the terminal briefly
+    terminal.show(true);
+
+    // Use dotnet test command - PowerShell compatible
+    const closeCommand = autoClose ? '; exit $LASTEXITCODE' : '';
+    terminal.sendText(`dotnet test "${solution.path}"${closeCommand}`, true);
+
+    // Timeout after 120 seconds (tests may take longer)
+    const timeoutId = setTimeout(() => {
+      disposable.dispose();
+      vscode.window.showWarningMessage(`Test timeout: ${solution.name}`);
+      resolve(); // Continue anyway
+    }, 120000);
+
+    // Wait for terminal to close (test complete)
+    const disposable = vscode.window.onDidCloseTerminal(async closedTerminal => {
+      if (closedTerminal === terminal) {
+        clearTimeout(timeoutId);
+        disposable.dispose();
+
+        // Check if test succeeded by looking at exit code
+        if (closedTerminal.exitStatus?.code === 0) {
+          vscode.window.showInformationMessage(`✓ Tests passed: ${solution.name}`);
+          resolve();
+        } else {
+          vscode.window.showErrorMessage(`Tests failed: ${solution.name}`);
+          reject(new Error('Tests failed'));
         }
       }
     });
@@ -784,6 +919,74 @@ export async function quickRebuild(): Promise<void> {
 
   // Chain the commands together (terminal stays open)
   terminal.sendText(`dotnet clean "${itemPath}"; dotnet build "${itemPath}"`);
+}
+
+/**
+ * Quick test: Show project picker and run tests
+ */
+export async function quickTest(): Promise<void> {
+  const projects = await findTestProjects();
+  const solutions = await findSolutionFiles();
+
+  if (projects.length === 0 && solutions.length === 0) {
+    vscode.window.showWarningMessage('No test projects or solutions found in workspace');
+    return;
+  }
+
+  // Show picker with both projects and solutions
+  interface BuildableQuickPickItem extends vscode.QuickPickItem {
+    item: BuildableItem;
+  }
+
+  const items: BuildableQuickPickItem[] = [];
+
+  // Add solutions first
+  for (const solution of solutions) {
+    items.push({
+      label: `$(folder) ${solution.name}`,
+      description: 'Solution',
+      detail: `${solution.projectCount} project(s) • ${path.dirname(solution.path)}`,
+      item: solution,
+    });
+  }
+
+  // Add test projects
+  for (const project of projects) {
+    items.push({
+      label: `$(beaker) ${project.name}`,
+      description: 'Test Project',
+      detail: `${project.targetFramework} • ${path.dirname(project.path)}`,
+      item: project,
+    });
+  }
+
+  // Sort items to show last used item first
+  if (lastUsedItemPath) {
+    items.sort((a, b) => {
+      if (a.item.path === lastUsedItemPath) return -1;
+      if (b.item.path === lastUsedItemPath) return 1;
+      return 0;
+    });
+  }
+
+  const selected = await vscode.window.showQuickPick(items, {
+    placeHolder: 'Select a project or solution to test',
+    matchOnDescription: true,
+    matchOnDetail: true,
+  });
+
+  if (!selected) {
+    return;
+  }
+
+  lastUsedItemPath = selected.item.path;
+
+  // Test based on type
+  if (isSolution(selected.item)) {
+    await testSolution(selected.item);
+  } else {
+    await testProject(selected.item);
+  }
 }
 
 /**
