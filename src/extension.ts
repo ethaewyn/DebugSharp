@@ -28,6 +28,7 @@ import {
 } from './debug/launcher';
 import { registerVariableCompletionProvider, updateDebugContext } from './ui/completionProvider';
 import { showNugetPackageManager, initializeNugetPanel } from './ui/panels/nugetManager';
+import { initializeDiagnostics } from './debug/diagnostics';
 
 /**
  * Clean up any orphaned .vscode-debug-eval.cs files from previous sessions
@@ -90,6 +91,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   initializeWebview(context);
   initializeEvaluationPanel(context);
   initializeNugetPanel(context);
+
+  // Initialize build diagnostics
+  initializeDiagnostics(context);
 
   // Clean up any leftover temp files from previous sessions
   await cleanupOrphanedTempFiles();

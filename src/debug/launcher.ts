@@ -6,6 +6,13 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as child_process from 'child_process';
+import {
+  clearDiagnostics,
+  parseBuildOutput,
+  parseTestOutput,
+  updateDiagnostics,
+} from './diagnostics';
 
 // Store the last used project/solution path for quick access
 let lastUsedItemPath: string | undefined;
@@ -221,45 +228,43 @@ export async function cleanProject(
 ): Promise<void> {
   const projectDir = path.dirname(project.path);
 
+  // Clear diagnostics when cleaning
+  clearDiagnostics();
+
+  vscode.window.showInformationMessage(`Cleaning ${project.name}...`);
+
   return new Promise<void>((resolve, reject) => {
+    // Show terminal for output visibility
     const terminal = vscode.window.createTerminal({
       name: `Clean ${project.name}`,
       cwd: projectDir,
-      hideFromUser: false,
     });
+    terminal.show();
+    terminal.sendText(`dotnet clean "${project.path}"`);
 
-    vscode.window.showInformationMessage(`Cleaning ${project.name}...`);
+    // Also capture output for diagnostics
+    const process = child_process.exec(
+      `dotnet clean "${project.path}"`,
+      { cwd: projectDir, maxBuffer: 1024 * 1024 * 10 },
+      (error, stdout, stderr) => {
+        const output = stdout + stderr;
 
-    // Show the terminal briefly
-    terminal.show(true);
-
-    // Use dotnet clean command - PowerShell compatible
-    const closeCommand = autoClose ? '; exit $LASTEXITCODE' : '';
-    terminal.sendText(`dotnet clean "${project.path}"${closeCommand}`, true);
-
-    // Timeout after 60 seconds
-    const timeoutId = setTimeout(() => {
-      disposable.dispose();
-      vscode.window.showWarningMessage(`Clean timeout: ${project.name}`);
-      resolve(); // Continue anyway
-    }, 60000);
-
-    // Wait for terminal to close (clean complete)
-    const disposable = vscode.window.onDidCloseTerminal(async closedTerminal => {
-      if (closedTerminal === terminal) {
-        clearTimeout(timeoutId);
-        disposable.dispose();
-
-        // Check if clean succeeded by looking at exit code
-        if (closedTerminal.exitStatus?.code === 0) {
-          vscode.window.showInformationMessage(`✓ Clean succeeded: ${project.name}`);
-          resolve();
-        } else {
+        if (error && error.code !== 0) {
+          // Only parse diagnostics on failure
+          if (output) {
+            const diagnosticMap = parseBuildOutput(output, projectDir);
+            updateDiagnostics(diagnosticMap);
+          }
           vscode.window.showErrorMessage(`Clean failed: ${project.name}`);
           reject(new Error('Clean failed'));
+        } else {
+          // Explicitly clear diagnostics again on successful clean
+          clearDiagnostics();
+          vscode.window.showInformationMessage(`✓ Clean succeeded: ${project.name}`);
+          resolve();
         }
-      }
-    });
+      },
+    );
   });
 }
 
@@ -272,45 +277,42 @@ export async function buildProject(
 ): Promise<void> {
   const projectDir = path.dirname(project.path);
 
+  // Clear diagnostics before building
+  clearDiagnostics();
+
+  vscode.window.showInformationMessage(`Building ${project.name}...`);
+
   return new Promise<void>((resolve, reject) => {
+    // Show terminal for output visibility
     const terminal = vscode.window.createTerminal({
       name: `Build ${project.name}`,
       cwd: projectDir,
-      hideFromUser: false,
     });
+    terminal.show();
+    terminal.sendText(`dotnet build "${project.path}"`);
 
-    vscode.window.showInformationMessage(`Building ${project.name}...`);
+    // Also capture output for diagnostics
+    const process = child_process.exec(
+      `dotnet build "${project.path}"`,
+      { cwd: projectDir, maxBuffer: 1024 * 1024 * 10 },
+      (error, stdout, stderr) => {
+        const output = stdout + stderr;
 
-    // Show the terminal briefly
-    terminal.show(true);
+        // Parse diagnostics from output
+        if (output) {
+          const diagnosticMap = parseBuildOutput(output, projectDir);
+          updateDiagnostics(diagnosticMap);
+        }
 
-    // Use dotnet build command - PowerShell compatible
-    const closeCommand = autoClose ? '; exit $LASTEXITCODE' : '';
-    terminal.sendText(`dotnet build "${project.path}"${closeCommand}`, true);
-
-    // Timeout after 60 seconds
-    const timeoutId = setTimeout(() => {
-      disposable.dispose();
-      vscode.window.showWarningMessage(`Build timeout: ${project.name}`);
-      resolve(); // Continue anyway
-    }, 60000);
-
-    // Wait for terminal to close (build complete)
-    const disposable = vscode.window.onDidCloseTerminal(async closedTerminal => {
-      if (closedTerminal === terminal) {
-        clearTimeout(timeoutId);
-        disposable.dispose();
-
-        // Check if build succeeded by looking at exit code
-        if (closedTerminal.exitStatus?.code === 0) {
-          vscode.window.showInformationMessage(`✓ Build succeeded: ${project.name}`);
-          resolve();
-        } else {
+        if (error && error.code !== 0) {
           vscode.window.showErrorMessage(`Build failed: ${project.name}`);
           reject(new Error('Build failed'));
+        } else {
+          vscode.window.showInformationMessage(`✓ Build succeeded: ${project.name}`);
+          resolve();
         }
-      }
-    });
+      },
+    );
   });
 }
 
@@ -323,45 +325,42 @@ export async function buildSolution(
 ): Promise<void> {
   const solutionDir = path.dirname(solution.path);
 
+  // Clear diagnostics before building
+  clearDiagnostics();
+
+  vscode.window.showInformationMessage(`Building solution ${solution.name}...`);
+
   return new Promise<void>((resolve, reject) => {
+    // Show terminal for output visibility
     const terminal = vscode.window.createTerminal({
       name: `Build ${solution.name}`,
       cwd: solutionDir,
-      hideFromUser: false,
     });
+    terminal.show();
+    terminal.sendText(`dotnet build "${solution.path}"`);
 
-    vscode.window.showInformationMessage(`Building solution ${solution.name}...`);
+    // Also capture output for diagnostics
+    const process = child_process.exec(
+      `dotnet build "${solution.path}"`,
+      { cwd: solutionDir, maxBuffer: 1024 * 1024 * 10 },
+      (error, stdout, stderr) => {
+        const output = stdout + stderr;
 
-    // Show the terminal briefly
-    terminal.show(true);
+        // Parse diagnostics from output
+        if (output) {
+          const diagnosticMap = parseBuildOutput(output, solutionDir);
+          updateDiagnostics(diagnosticMap);
+        }
 
-    // Use dotnet build command - PowerShell compatible
-    const closeCommand = autoClose ? '; exit $LASTEXITCODE' : '';
-    terminal.sendText(`dotnet build "${solution.path}"${closeCommand}`, true);
-
-    // Timeout after 120 seconds (solutions may take longer)
-    const timeoutId = setTimeout(() => {
-      disposable.dispose();
-      vscode.window.showWarningMessage(`Build timeout: ${solution.name}`);
-      resolve(); // Continue anyway
-    }, 120000);
-
-    // Wait for terminal to close (build complete)
-    const disposable = vscode.window.onDidCloseTerminal(async closedTerminal => {
-      if (closedTerminal === terminal) {
-        clearTimeout(timeoutId);
-        disposable.dispose();
-
-        // Check if build succeeded by looking at exit code
-        if (closedTerminal.exitStatus?.code === 0) {
-          vscode.window.showInformationMessage(`✓ Build succeeded: ${solution.name}`);
-          resolve();
-        } else {
+        if (error && error.code !== 0) {
           vscode.window.showErrorMessage(`Build failed: ${solution.name}`);
           reject(new Error('Build failed'));
+        } else {
+          vscode.window.showInformationMessage(`✓ Build succeeded: ${solution.name}`);
+          resolve();
         }
-      }
-    });
+      },
+    );
   });
 }
 
@@ -374,45 +373,43 @@ export async function cleanSolution(
 ): Promise<void> {
   const solutionDir = path.dirname(solution.path);
 
+  // Clear diagnostics when cleaning
+  clearDiagnostics();
+
+  vscode.window.showInformationMessage(`Cleaning solution ${solution.name}...`);
+
   return new Promise<void>((resolve, reject) => {
+    // Show terminal for output visibility
     const terminal = vscode.window.createTerminal({
       name: `Clean ${solution.name}`,
       cwd: solutionDir,
-      hideFromUser: false,
     });
+    terminal.show();
+    terminal.sendText(`dotnet clean "${solution.path}"`);
 
-    vscode.window.showInformationMessage(`Cleaning solution ${solution.name}...`);
+    // Also capture output for diagnostics
+    const process = child_process.exec(
+      `dotnet clean "${solution.path}"`,
+      { cwd: solutionDir, maxBuffer: 1024 * 1024 * 10 },
+      (error, stdout, stderr) => {
+        const output = stdout + stderr;
 
-    // Show the terminal briefly
-    terminal.show(true);
-
-    // Use dotnet clean command - PowerShell compatible
-    const closeCommand = autoClose ? '; exit $LASTEXITCODE' : '';
-    terminal.sendText(`dotnet clean "${solution.path}"${closeCommand}`, true);
-
-    // Timeout after 60 seconds
-    const timeoutId = setTimeout(() => {
-      disposable.dispose();
-      vscode.window.showWarningMessage(`Clean timeout: ${solution.name}`);
-      resolve(); // Continue anyway
-    }, 60000);
-
-    // Wait for terminal to close (clean complete)
-    const disposable = vscode.window.onDidCloseTerminal(async closedTerminal => {
-      if (closedTerminal === terminal) {
-        clearTimeout(timeoutId);
-        disposable.dispose();
-
-        // Check if clean succeeded by looking at exit code
-        if (closedTerminal.exitStatus?.code === 0) {
-          vscode.window.showInformationMessage(`✓ Clean succeeded: ${solution.name}`);
-          resolve();
-        } else {
+        if (error && error.code !== 0) {
+          // Only parse diagnostics on failure
+          if (output) {
+            const diagnosticMap = parseBuildOutput(output, solutionDir);
+            updateDiagnostics(diagnosticMap);
+          }
           vscode.window.showErrorMessage(`Clean failed: ${solution.name}`);
           reject(new Error('Clean failed'));
+        } else {
+          // Explicitly clear diagnostics again on successful clean
+          clearDiagnostics();
+          vscode.window.showInformationMessage(`✓ Clean succeeded: ${solution.name}`);
+          resolve();
         }
-      }
-    });
+      },
+    );
   });
 }
 
@@ -422,45 +419,46 @@ export async function cleanSolution(
 export async function testProject(project: ProjectInfo, autoClose: boolean = false): Promise<void> {
   const projectDir = path.dirname(project.path);
 
+  // Clear diagnostics before testing
+  clearDiagnostics();
+
+  vscode.window.showInformationMessage(`Testing ${project.name}...`);
+
   return new Promise<void>((resolve, reject) => {
+    // Show terminal for output visibility
     const terminal = vscode.window.createTerminal({
       name: `Test ${project.name}`,
       cwd: projectDir,
-      hideFromUser: false,
     });
+    terminal.show();
+    terminal.sendText(`dotnet test "${project.path}"`);
 
-    vscode.window.showInformationMessage(`Testing ${project.name}...`);
+    // Also capture output for diagnostics
+    const process = child_process.exec(
+      `dotnet test "${project.path}"`,
+      { cwd: projectDir, maxBuffer: 1024 * 1024 * 10 },
+      (error, stdout, stderr) => {
+        const output = stdout + stderr;
 
-    // Show the terminal briefly
-    terminal.show(true);
+        // Parse both build errors and test failures
+        if (output) {
+          const buildDiagnostics = parseBuildOutput(output, projectDir);
+          const testDiagnostics = parseTestOutput(output, projectDir);
 
-    // Use dotnet test command - PowerShell compatible
-    const closeCommand = autoClose ? '; exit $LASTEXITCODE' : '';
-    terminal.sendText(`dotnet test "${project.path}"${closeCommand}`, true);
+          // Merge diagnostics
+          const allDiagnostics = new Map([...buildDiagnostics, ...testDiagnostics]);
+          updateDiagnostics(allDiagnostics);
+        }
 
-    // Timeout after 120 seconds (tests may take longer)
-    const timeoutId = setTimeout(() => {
-      disposable.dispose();
-      vscode.window.showWarningMessage(`Test timeout: ${project.name}`);
-      resolve(); // Continue anyway
-    }, 120000);
-
-    // Wait for terminal to close (test complete)
-    const disposable = vscode.window.onDidCloseTerminal(async closedTerminal => {
-      if (closedTerminal === terminal) {
-        clearTimeout(timeoutId);
-        disposable.dispose();
-
-        // Check if test succeeded by looking at exit code
-        if (closedTerminal.exitStatus?.code === 0) {
-          vscode.window.showInformationMessage(`✓ Tests passed: ${project.name}`);
-          resolve();
-        } else {
+        if (error && error.code !== 0) {
           vscode.window.showErrorMessage(`Tests failed: ${project.name}`);
           reject(new Error('Tests failed'));
+        } else {
+          vscode.window.showInformationMessage(`✓ Tests passed: ${project.name}`);
+          resolve();
         }
-      }
-    });
+      },
+    );
   });
 }
 
@@ -473,45 +471,46 @@ export async function testSolution(
 ): Promise<void> {
   const solutionDir = path.dirname(solution.path);
 
+  // Clear diagnostics before testing
+  clearDiagnostics();
+
+  vscode.window.showInformationMessage(`Testing solution ${solution.name}...`);
+
   return new Promise<void>((resolve, reject) => {
+    // Show terminal for output visibility
     const terminal = vscode.window.createTerminal({
       name: `Test ${solution.name}`,
       cwd: solutionDir,
-      hideFromUser: false,
     });
+    terminal.show();
+    terminal.sendText(`dotnet test "${solution.path}"`);
 
-    vscode.window.showInformationMessage(`Testing solution ${solution.name}...`);
+    // Also capture output for diagnostics
+    const process = child_process.exec(
+      `dotnet test "${solution.path}"`,
+      { cwd: solutionDir, maxBuffer: 1024 * 1024 * 10 },
+      (error, stdout, stderr) => {
+        const output = stdout + stderr;
 
-    // Show the terminal briefly
-    terminal.show(true);
+        // Parse both build errors and test failures
+        if (output) {
+          const buildDiagnostics = parseBuildOutput(output, solutionDir);
+          const testDiagnostics = parseTestOutput(output, solutionDir);
 
-    // Use dotnet test command - PowerShell compatible
-    const closeCommand = autoClose ? '; exit $LASTEXITCODE' : '';
-    terminal.sendText(`dotnet test "${solution.path}"${closeCommand}`, true);
+          // Merge diagnostics
+          const allDiagnostics = new Map([...buildDiagnostics, ...testDiagnostics]);
+          updateDiagnostics(allDiagnostics);
+        }
 
-    // Timeout after 120 seconds (tests may take longer)
-    const timeoutId = setTimeout(() => {
-      disposable.dispose();
-      vscode.window.showWarningMessage(`Test timeout: ${solution.name}`);
-      resolve(); // Continue anyway
-    }, 120000);
-
-    // Wait for terminal to close (test complete)
-    const disposable = vscode.window.onDidCloseTerminal(async closedTerminal => {
-      if (closedTerminal === terminal) {
-        clearTimeout(timeoutId);
-        disposable.dispose();
-
-        // Check if test succeeded by looking at exit code
-        if (closedTerminal.exitStatus?.code === 0) {
-          vscode.window.showInformationMessage(`✓ Tests passed: ${solution.name}`);
-          resolve();
-        } else {
+        if (error && error.code !== 0) {
           vscode.window.showErrorMessage(`Tests failed: ${solution.name}`);
           reject(new Error('Tests failed'));
+        } else {
+          vscode.window.showInformationMessage(`✓ Tests passed: ${solution.name}`);
+          resolve();
         }
-      }
-    });
+      },
+    );
   });
 }
 
@@ -949,22 +948,19 @@ export async function quickRebuild(): Promise<void> {
 
   const item = selected.item;
   lastUsedItemPath = item.path;
-  const itemPath = item.path;
-  const itemDir = path.dirname(itemPath);
-  const itemName = item.name;
 
-  // Chain clean and build in one terminal (keep terminal open)
-  const terminal = vscode.window.createTerminal({
-    name: `Rebuild ${itemName}`,
-    cwd: itemDir,
-    hideFromUser: false,
-  });
-
-  vscode.window.showInformationMessage(`Rebuilding ${itemName}...`);
-  terminal.show(true);
-
-  // Chain the commands together (terminal stays open)
-  terminal.sendText(`dotnet clean "${itemPath}"; dotnet build "${itemPath}"`);
+  // Perform clean and build sequentially with diagnostic support
+  try {
+    if (isSolution(item)) {
+      await cleanSolution(item, true);
+      await buildSolution(item, false);
+    } else {
+      await cleanProject(item, true);
+      await buildProject(item, false);
+    }
+  } catch (error) {
+    // Error messages already shown by individual functions
+  }
 }
 
 /**

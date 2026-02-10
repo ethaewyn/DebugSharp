@@ -7,10 +7,11 @@ Enhanced C# debugging experience with inline evaluation, IntelliSense-powered ex
 ### Project Management
 
 - **Quick Launch** (`Ctrl+Shift+F5`) - Instantly debug any C# project with automatic building
-- **Quick Build** (`Ctrl+Shift+B`) - Build any project or solution
-- **Quick Clean** (`Ctrl+Shift+K`) - Clean build artifacts from projects or solutions
-- **Quick Rebuild** (`Ctrl+Shift+R`) - Clean and rebuild projects or solutions
-- **Quick Test** (`Ctrl+Shift+T`) - Run tests for test projects or solutions
+- **Quick Build** (`Ctrl+Shift+B`) - Build any project or solution with errors reported to Problems panel
+- **Quick Clean** (`Ctrl+Shift+K`) - Clean build artifacts, clears Problems panel on success
+- **Quick Rebuild** (`Ctrl+Shift+R`) - Clean and rebuild with automatic error detection
+- **Quick Test** (`Ctrl+Shift+T`) - Run tests with failures shown in Problems panel
+- **Problems Panel Integration** - All build, test errors appear with clickable file/line links
 - **NuGet Package Manager** - Visual package management (right-click `.csproj`)
 - **Smart project detection** - Remembers last used project for quick access
 
@@ -37,25 +38,31 @@ Enhanced C# debugging experience with inline evaluation, IntelliSense-powered ex
 
 1. Press `Ctrl+Shift+B` (Mac: `Cmd+Shift+B`)
 2. Select a project or solution (last used appears first)
-3. Build runs and shows progress in terminal
+3. Build runs with progress shown via notification
+4. Any errors or warnings appear in the **Problems panel** (`Ctrl+Shift+M`)
+5. Click any error to jump directly to the file and line
 
 **Quick Clean** - Clean build artifacts:
 
 1. Press `Ctrl+Shift+K` (Mac: `Cmd+Shift+K`)
 2. Select a project or solution (last used appears first)
 3. Removes all build outputs (bin/obj folders)
+4. Clears the Problems panel on successful clean
 
 **Quick Rebuild** - Clean and rebuild in one step:
 
 1. Press `Ctrl+Shift+R` (Mac: `Cmd+Shift+R`)
 2. Select a project or solution (last used appears first)
-3. Cleans then builds in one terminal
+3. Cleans then builds sequentially
+4. Build errors appear in the Problems panel
 
 **Quick Test** - Run tests:
 
 1. Press `Ctrl+Shift+T` (Mac: `Cmd+Shift+T`)
 2. Select a test project or solution (last used appears first)
-3. Tests run and results show in terminal
+3. Tests run with results shown via notification
+4. Any test failures appear in the **Problems panel** with stack traces
+5. Build errors during test compilation also appear in Problems panel
 
 **All commands support:**
 
@@ -66,6 +73,33 @@ Enhanced C# debugging experience with inline evaluation, IntelliSense-powered ex
 - Test projects (xUnit, NUnit, MSTest)
 
 **No tasks.json required!** Everything is handled automatically.
+
+### Problems Panel Integration
+
+**Automatic error detection and reporting:**
+
+When you build, rebuild, clean, or test a project, DebugSharp automatically:
+
+- **Parses dotnet command output** for errors and warnings
+- **Reports issues to VS Code's Problems panel** (`Ctrl+Shift+M`)
+- **Creates clickable links** to exact file locations and line numbers
+- **Deduplicates errors** so each issue appears only once
+- **Clears on clean** - successful clean operations remove all problems
+
+**Supported error types:**
+
+- Compilation errors (CS####)
+- Build warnings
+- Test failures with stack traces
+- Missing references
+- Syntax errors
+
+**Why this matters:**
+
+- Navigate to errors instantly by clicking in Problems panel
+- See all issues at a glance in one organized view
+- No need to parse terminal output manually
+- Same experience as other VS Code language extensions
 
 ### NuGet Package Manager
 
