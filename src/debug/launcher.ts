@@ -92,10 +92,20 @@ export async function findSolutionFiles(): Promise<SolutionInfo[]> {
       const content = fs.readFileSync(solutionPath, 'utf8');
       let projectCount = 0;
 
-      if (ext === '.sln' || ext === '.slnf') {
-        // Traditional .sln format or solution filter
+      if (ext === '.sln') {
+        // Traditional .sln format
         const projectMatches = content.match(/Project\("{[^}]+}"\)/g);
         projectCount = projectMatches ? projectMatches.length : 0;
+      } else if (ext === '.slnf') {
+        // Solution filter is JSON format
+        try {
+          const slnfJson = JSON.parse(content);
+          if (slnfJson.solution?.projects) {
+            projectCount = slnfJson.solution.projects.length;
+          }
+        } catch {
+          projectCount = 0;
+        }
       } else if (ext === '.slnx') {
         // XML-based solution format
         const projectMatches = content.match(/<Project\s+Path="[^"]+"/g);
@@ -274,7 +284,7 @@ export async function cleanProject(
 export async function buildProject(
   project: ProjectInfo,
   autoClose: boolean = false,
-): Promise<void> {
+): Promise<string | null> {
   const projectDir = path.dirname(project.path);
 
   // Clear diagnostics before building
@@ -282,7 +292,7 @@ export async function buildProject(
 
   vscode.window.showInformationMessage(`Building ${project.name}...`);
 
-  return new Promise<void>((resolve, reject) => {
+  return new Promise<string | null>((resolve, reject) => {
     // Show terminal for output visibility
     const terminal = vscode.window.createTerminal({
       name: `Build ${project.name}`,
@@ -291,7 +301,7 @@ export async function buildProject(
     terminal.show();
     terminal.sendText(`dotnet build "${project.path}"`);
 
-    // Also capture output for diagnostics
+    // Also capture output for diagnostics and DLL path
     const process = child_process.exec(
       `dotnet build "${project.path}"`,
       { cwd: projectDir, maxBuffer: 1024 * 1024 * 10 },
@@ -308,8 +318,15 @@ export async function buildProject(
           vscode.window.showErrorMessage(`Build failed: ${project.name}`);
           reject(new Error('Build failed'));
         } else {
+          // Extract DLL path from build output
+          let dllPath: string | null = null;
+          const dllMatch = output.match(/->\s*([^\r\n]+\.dll)/i);
+          if (dllMatch) {
+            dllPath = dllMatch[1].trim();
+          }
+
           vscode.window.showInformationMessage(`✓ Build succeeded: ${project.name}`);
-          resolve();
+          resolve(dllPath);
         }
       },
     );
@@ -685,7 +702,6 @@ export async function quickLaunch(): Promise<void> {
   const selectedProject = await vscode.window.showQuickPick(projectItems, {
     placeHolder: 'Select a project to debug',
     matchOnDescription: true,
-    matchOnDetail: true,
   });
 
   if (!selectedProject) {
@@ -719,7 +735,6 @@ export async function quickLaunch(): Promise<void> {
       const selectedProfile = await vscode.window.showQuickPick(profileItems, {
         placeHolder: `Select a launch profile for ${project.name}`,
         matchOnDescription: true,
-        matchOnDetail: true,
       });
 
       if (!selectedProfile) {
@@ -731,21 +746,25 @@ export async function quickLaunch(): Promise<void> {
   }
 
   // Build the project first (auto-close terminal for seamless launch)
-  await buildProject(project, true);
+  const dllPath = await buildProject(project, true);
 
   // Small delay to ensure DLL is fully written (especially important for ASP.NET Core apps)
   await new Promise(resolve => setTimeout(resolve, 500));
 
-  // Find the actual DLL path after build
-  const dllPath = findBuiltDllPath(project);
-  if (!dllPath) {
+  // Use DLL path from build output, or fall back to searching
+  let finalDllPath = dllPath;
+  if (!finalDllPath) {
+    finalDllPath = findBuiltDllPath(project);
+  }
+
+  if (!finalDllPath) {
     vscode.window.showErrorMessage(
       `Could not find built DLL for ${project.name}. Build may have failed.`,
     );
     return;
   }
 
-  const config = generateDebugConfig(project, profileName, dllPath);
+  const config = generateDebugConfig(project, profileName, finalDllPath);
 
   // Start debugging
   const workspaceFolder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(project.path));
@@ -803,7 +822,6 @@ export async function quickBuild(): Promise<void> {
   const selected = await vscode.window.showQuickPick(items, {
     placeHolder: 'Select a project or solution to build',
     matchOnDescription: true,
-    matchOnDetail: true,
   });
 
   if (!selected) {
@@ -871,7 +889,6 @@ export async function quickClean(): Promise<void> {
   const selected = await vscode.window.showQuickPick(items, {
     placeHolder: 'Select a project or solution to clean',
     matchOnDescription: true,
-    matchOnDetail: true,
   });
 
   if (!selected) {
@@ -939,7 +956,6 @@ export async function quickRebuild(): Promise<void> {
   const selected = await vscode.window.showQuickPick(items, {
     placeHolder: 'Select a project or solution to rebuild',
     matchOnDescription: true,
-    matchOnDetail: true,
   });
 
   if (!selected) {
@@ -1014,7 +1030,6 @@ export async function quickTest(): Promise<void> {
   const selected = await vscode.window.showQuickPick(items, {
     placeHolder: 'Select a project or solution to test',
     matchOnDescription: true,
-    matchOnDetail: true,
   });
 
   if (!selected) {
