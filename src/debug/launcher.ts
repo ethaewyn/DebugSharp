@@ -25,6 +25,7 @@ interface ProjectInfo {
   isWeb: boolean;
   hasLaunchSettings: boolean;
   launchProfiles?: any;
+  assemblyName?: string;
 }
 
 interface SolutionInfo {
@@ -190,6 +191,13 @@ async function analyzeProject(projectPath: string): Promise<ProjectInfo | null> 
       targetFramework = tfmMatch[1];
     }
 
+    // Get assembly name (if different from project name)
+    let assemblyName: string | undefined;
+    const assemblyNameMatch = content.match(/<AssemblyName>([^<]+)<\/AssemblyName>/);
+    if (assemblyNameMatch) {
+      assemblyName = assemblyNameMatch[1];
+    }
+
     // Check if it's a web project
     const isWeb =
       content.includes('Microsoft.NET.Sdk.Web') || content.includes('Microsoft.AspNetCore');
@@ -223,6 +231,7 @@ async function analyzeProject(projectPath: string): Promise<ProjectInfo | null> 
       isWeb,
       hasLaunchSettings,
       launchProfiles,
+      assemblyName,
     };
   } catch {
     return null;
@@ -318,11 +327,26 @@ export async function buildProject(
           vscode.window.showErrorMessage(`Build failed: ${project.name}`);
           reject(new Error('Build failed'));
         } else {
-          // Extract DLL path from build output
+          // Extract DLL path from build output - find the one matching this project
           let dllPath: string | null = null;
-          const dllMatch = output.match(/->\s*([^\r\n]+\.dll)/i);
+          // Use AssemblyName if specified in .csproj, otherwise use project name
+          const dllBaseName = project.assemblyName || project.name;
+
+          // Look for line containing "-> path/to/AssemblyName.dll"
+          const dllRegex = new RegExp(
+            `->\\s*([^\\r\\n]*${dllBaseName.replace(/[.*+?^${}()|[\]\\\\]/g, '\\$&')}\\.dll)`,
+            'i',
+          );
+          const dllMatch = output.match(dllRegex);
+
           if (dllMatch) {
-            dllPath = dllMatch[1].trim();
+            let extractedPath = dllMatch[1].trim();
+            // If path is relative, make it absolute relative to project directory
+            if (!path.isAbsolute(extractedPath)) {
+              extractedPath = path.join(projectDir, extractedPath);
+            }
+            // Normalize the path
+            dllPath = path.normalize(extractedPath);
           }
 
           vscode.window.showInformationMessage(`✓ Build succeeded: ${project.name}`);
