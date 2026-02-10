@@ -51,21 +51,49 @@ export async function findRunnableProjects(): Promise<ProjectInfo[]> {
 }
 
 /**
- * Find all solution files in the workspace
+ * Find all C# projects in the workspace (including libraries)
+ */
+export async function findAllProjects(): Promise<ProjectInfo[]> {
+  const projects: ProjectInfo[] = [];
+  const csprojFiles = await vscode.workspace.findFiles('**/*.csproj', '**/node_modules/**');
+
+  for (const uri of csprojFiles) {
+    const projectPath = uri.fsPath;
+    const projectInfo = await analyzeProject(projectPath);
+    if (projectInfo) {
+      projects.push(projectInfo);
+    }
+  }
+
+  return projects;
+}
+
+/**
+ * Find all solution files in the workspace (including .sln, .slnx, and .slnf)
  */
 export async function findSolutionFiles(): Promise<SolutionInfo[]> {
   const solutions: SolutionInfo[] = [];
-  const slnFiles = await vscode.workspace.findFiles('**/*.sln', '**/node_modules/**');
+  const slnFiles = await vscode.workspace.findFiles('**/*.{sln,slnx,slnf}', '**/node_modules/**');
 
   for (const uri of slnFiles) {
     const solutionPath = uri.fsPath;
-    const solutionName = path.basename(solutionPath, '.sln');
+    const ext = path.extname(solutionPath);
+    const solutionName = path.basename(solutionPath, ext);
 
     // Count projects in the solution
     try {
       const content = fs.readFileSync(solutionPath, 'utf8');
-      const projectMatches = content.match(/Project\("{[^}]+}"\)/g);
-      const projectCount = projectMatches ? projectMatches.length : 0;
+      let projectCount = 0;
+
+      if (ext === '.sln' || ext === '.slnf') {
+        // Traditional .sln format or solution filter
+        const projectMatches = content.match(/Project\("{[^}]+}"\)/g);
+        projectCount = projectMatches ? projectMatches.length : 0;
+      } else if (ext === '.slnx') {
+        // XML-based solution format
+        const projectMatches = content.match(/<Project\s+Path="[^"]+"/g);
+        projectCount = projectMatches ? projectMatches.length : 0;
+      }
 
       solutions.push({
         name: solutionName,
@@ -550,23 +578,38 @@ function generateDebugConfig(
   // Use provided DLL path or calculate default
   let programPath: string;
   if (dllPath) {
-    programPath = path.relative(workspaceRoot, dllPath).replace(/\\/g, '/');
+    let relativePath = path.relative(workspaceRoot, dllPath).replace(/\\/g, '/');
+    // Handle edge cases: empty path, ".", or "./"
+    if (!relativePath || relativePath === '.') {
+      relativePath = path.basename(dllPath);
+    }
+    programPath = relativePath;
   } else {
     const relativeProjectPath = path.relative(workspaceRoot, project.path).replace(/\\/g, '/');
-    const relativeProjectDir = path.dirname(relativeProjectPath);
+    let relativeProjectDir = path.dirname(relativeProjectPath);
+    // Handle edge cases: empty path, ".", or "./"
+    if (!relativeProjectDir || relativeProjectDir === '.') {
+      relativeProjectDir = '';
+    }
     const dllName = `${project.name}.dll`;
-    programPath = `${relativeProjectDir}/bin/Debug/${project.targetFramework}/${dllName}`;
+    programPath = relativeProjectDir
+      ? `${relativeProjectDir}/bin/Debug/${project.targetFramework}/${dllName}`
+      : `bin/Debug/${project.targetFramework}/${dllName}`;
   }
 
-  const relativeProjectDir = path.relative(workspaceRoot, projectDir).replace(/\\/g, '/');
+  let relativeProjectDir = path.relative(workspaceRoot, projectDir).replace(/\\/g, '/');
+  // Handle edge cases for cwd
+  if (!relativeProjectDir || relativeProjectDir === '.') {
+    relativeProjectDir = '';
+  }
 
   const config: vscode.DebugConfiguration = {
     name: profileName ? `${project.name} (${profileName})` : project.name,
     type: 'coreclr',
     request: 'launch',
-    program: '${workspaceFolder}/' + programPath,
+    program: `\${workspaceFolder}/${programPath}`,
     args: [],
-    cwd: '${workspaceFolder}/' + relativeProjectDir,
+    cwd: relativeProjectDir ? `\${workspaceFolder}/${relativeProjectDir}` : '${workspaceFolder}',
     stopAtEntry: false,
     console: project.isWeb ? 'internalConsole' : 'integratedTerminal',
   };
@@ -691,6 +734,9 @@ export async function quickLaunch(): Promise<void> {
   // Build the project first (auto-close terminal for seamless launch)
   await buildProject(project, true);
 
+  // Small delay to ensure DLL is fully written (especially important for ASP.NET Core apps)
+  await new Promise(resolve => setTimeout(resolve, 500));
+
   // Find the actual DLL path after build
   const dllPath = findBuiltDllPath(project);
   if (!dllPath) {
@@ -711,7 +757,7 @@ export async function quickLaunch(): Promise<void> {
  * Quick build: Show project picker and build without running
  */
 export async function quickBuild(): Promise<void> {
-  const projects = await findRunnableProjects();
+  const projects = await findAllProjects();
   const solutions = await findSolutionFiles();
 
   if (projects.length === 0 && solutions.length === 0) {
@@ -779,7 +825,7 @@ export async function quickBuild(): Promise<void> {
  * Quick clean: Show project picker and clean
  */
 export async function quickClean(): Promise<void> {
-  const projects = await findRunnableProjects();
+  const projects = await findAllProjects();
   const solutions = await findSolutionFiles();
 
   if (projects.length === 0 && solutions.length === 0) {
@@ -847,7 +893,7 @@ export async function quickClean(): Promise<void> {
  * Quick rebuild: Show project picker and rebuild (clean + build)
  */
 export async function quickRebuild(): Promise<void> {
-  const projects = await findRunnableProjects();
+  const projects = await findAllProjects();
   const solutions = await findSolutionFiles();
 
   if (projects.length === 0 && solutions.length === 0) {
