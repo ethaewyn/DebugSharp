@@ -2,7 +2,7 @@
   "name": "debugsharp",
   "displayName": "DebugSharp",
   "description": "Enhanced C# debugging with inline evaluation, JSON object viewing, project management, and automatic error reporting to Problems panel",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "publisher": "Ethaewyn",
   "icon": "icon.png",
   "categories": [
