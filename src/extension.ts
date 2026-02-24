@@ -14,6 +14,7 @@ import {
   initializeEvaluationPanel,
   createTempFile,
   deleteTempFile,
+  updateEvalScaffold,
 } from './ui/panels/evaluation';
 import { showObjectJson, showObjectPickerForLine } from './ui/panels/objectViewer';
 import { DebugInlayHintsProvider } from './ui/inlayHints/provider';
@@ -29,6 +30,13 @@ import {
 import { registerVariableCompletionProvider, updateDebugContext } from './ui/completionProvider';
 import { showNugetPackageManager, initializeNugetPanel } from './ui/panels/nugetManager';
 import { initializeDiagnostics } from './debug/diagnostics';
+import { extractUserExpression, isScaffoldFile } from './debug/scaffoldGenerator';
+import {
+  registerDebugTracker,
+  getLastStoppedState,
+  setLastStoppedFrameId,
+  clearStoppedState,
+} from './debug/debugTracker';
 
 /**
  * Clean up any orphaned .vscode-debug-eval.cs files from previous sessions
@@ -72,10 +80,13 @@ async function sendExpressionToDebugConsole(expression: string): Promise<void> {
 }
 
 /**
- * Parse expression from text (removes comments and empty lines)
+ * Parse expression from text (removes scaffold wrapper, comments, and empty lines)
  */
 function parseExpression(rawText: string): string {
-  return rawText
+  // If the text is a scaffold file, extract just the user's expression
+  const expressionText = isScaffoldFile(rawText) ? extractUserExpression(rawText) : rawText;
+
+  return expressionText
     .split('\n')
     .map(line => line.replace(/\/\/.*$/, '').trim())
     .filter(line => line.length > 0)
@@ -103,6 +114,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const inlayHintsProvider = new DebugInlayHintsProvider();
   const poller = new DebugPoller(inlayHintsProvider);
+
+  // Register a DAP tracker to reliably detect stopped state and update the scaffold.
+  // This replaces the poller-based approach which suffered from stale frame IDs
+  // (each stackTrace call allocates new IDs, invalidating variable references).
+  const trackerDisposable = registerDebugTracker(async (session, threadId) => {
+    const resolvedFrameId = await updateEvalScaffold(session, 0, threadId);
+    if (resolvedFrameId !== undefined) {
+      setLastStoppedFrameId(session, resolvedFrameId, threadId);
+      updateDebugContext(session, resolvedFrameId);
+    }
+  });
 
   const inlayHintsDisposable = vscode.languages.registerInlayHintsProvider(
     { language: 'csharp', scheme: 'file' },
@@ -135,13 +157,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
       }
 
-      const frameId = await getCurrentFrameId(session);
-      if (frameId === null) {
+      // Use the tracker's stored frameId (from the stopped event)
+      // instead of calling getCurrentFrameId which does another stackTrace
+      // and gets a stale frame on a potentially wrong thread.
+      const stoppedState = getLastStoppedState();
+      const frameId = stoppedState?.frameId ?? (await getCurrentFrameId(session));
+      if (frameId === null || frameId === undefined) {
         vscode.window.showWarningMessage('Debugger is not paused');
         return;
       }
 
-      // Update completion provider with current debug context
       updateDebugContext(session, frameId);
 
       const editor = vscode.window.activeTextEditor;
@@ -160,8 +185,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
       }
 
-      const frameId = await getCurrentFrameId(session);
-      if (frameId === null) {
+      const stoppedState = getLastStoppedState();
+      const frameId = stoppedState?.frameId ?? (await getCurrentFrameId(session));
+      if (frameId === null || frameId === undefined) {
         vscode.window.showWarningMessage('Debugger is not paused');
         return;
       }
@@ -269,12 +295,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       poller.setSession(undefined);
       poller.stopPolling();
       updateDebugContext(undefined, undefined);
+      clearStoppedState();
       deleteTempFile();
     }),
   ];
 
   context.subscriptions.push(
     inlayHintsDisposable,
+    trackerDisposable,
     showJsonCommand,
     viewObjectCommand,
     evaluateCommand,

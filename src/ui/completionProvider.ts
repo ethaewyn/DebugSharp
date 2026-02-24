@@ -2,9 +2,11 @@
  * Completion Provider for Runtime Variables
  *
  * Provides IntelliSense for variables available in the current debug scope.
- * Types are handled by the C# extension via the .vscode-debug-eval.cs file.
+ * Works alongside the scaffold generator which gives Roslyn static type info.
+ * This provider adds runtime values as documentation and handles dynamic member access.
  */
 import * as vscode from 'vscode';
+import { EXPR_START, EXPR_END } from '../debug/scaffoldGenerator';
 
 let debugSession: vscode.DebugSession | undefined;
 let currentFrameId: number | undefined;
@@ -21,14 +23,27 @@ export function registerVariableCompletionProvider(context: vscode.ExtensionCont
           return undefined;
         }
 
+        // Only provide completions within the expression markers
+        const fullText = document.getText();
+        const startIdx = fullText.indexOf(EXPR_START);
+        const endIdx = fullText.lastIndexOf(EXPR_END);
+        if (startIdx !== -1 && endIdx !== -1) {
+          const startLine = document.positionAt(startIdx + EXPR_START.length).line;
+          const endLine = document.positionAt(endIdx).line;
+          if (position.line <= startLine || position.line >= endLine) {
+            return undefined; // Outside expression area
+          }
+        }
+
         const linePrefix = document.lineAt(position).text.slice(0, position.character);
 
-        // Check if we're typing after a dot (member access)
-        const dotMatch = linePrefix.match(/([\w]+)\.(\w*)$/);
+        // Check if we're typing after a dot (member access — possibly chained)
+        const dotMatch = linePrefix.match(/([\w.]+)\.(\w*)$/);
         if (dotMatch) {
-          // For member access, get runtime members but mark as incomplete
-          // so C# extension can add its completions (including methods)
-          const runtimeMembers = await getMemberCompletions(dotMatch[1]);
+          // For member access, get runtime members and mark as incomplete
+          // so C# extension (Roslyn) can merge its static completions
+          const expression = dotMatch[1];
+          const runtimeMembers = await getMemberCompletions(expression);
           return new vscode.CompletionList(runtimeMembers, true);
         }
 
@@ -92,17 +107,17 @@ async function getVariableCompletions(): Promise<vscode.CompletionItem[]> {
 }
 
 /**
- * Get completions for members of an object
+ * Get completions for members of an object (supports chained access like a.b.c.)
  */
-async function getMemberCompletions(variableName: string): Promise<vscode.CompletionItem[]> {
+async function getMemberCompletions(expression: string): Promise<vscode.CompletionItem[]> {
   if (!debugSession || currentFrameId === undefined) {
     return [];
   }
 
   try {
-    // Evaluate the variable to get its reference
+    // Evaluate the expression to get its reference (works for chained access)
     const evalResult = await debugSession.customRequest('evaluate', {
-      expression: variableName,
+      expression: expression,
       frameId: currentFrameId,
       context: 'watch',
     });

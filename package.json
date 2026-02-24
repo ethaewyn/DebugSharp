@@ -2,7 +2,7 @@
   "name": "debugsharp",
   "displayName": "DebugSharp",
   "description": "Enhanced C# debugging with inline evaluation, JSON object viewing, project management, and automatic error reporting to Problems panel",
-  "version": "1.4.2",
+  "version": "1.5.0",
   "publisher": "Ethaewyn",
   "icon": "icon.png",
   "categories": [
@@ -116,8 +116,8 @@
     "keybindings": [
       {
         "command": "csharpDebugHints.evaluateExpression",
-        "key": "ctrl+e",
-        "mac": "cmd+e",
+        "key": "ctrl+shift+e",
+        "mac": "cmd+shift+e",
         "when": "editorTextFocus && editorLangId == csharp && debugState == 'stopped'"
       },
       {

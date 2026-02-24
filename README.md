@@ -120,7 +120,7 @@ When you build, rebuild, clean, or test a project, DebugSharp automatically:
 **During debugging:**
 
 1. Stop at a breakpoint
-2. Press `Ctrl+E` (Mac: `Cmd+E`) or right-click → "Evaluate Expression"
+2. Press `Ctrl+Shift+E` (Mac: `Cmd+Shift+E`) or right-click → "Evaluate Expression"
 3. A C# file opens with **full IntelliSense**:
    - All project types (classes, interfaces, enums)
    - All runtime variables from current scope
@@ -161,7 +161,7 @@ When you build, rebuild, clean, or test a project, DebugSharp automatically:
 | `Ctrl+Shift+K` (Mac: `Cmd+Shift+K`)   | Quick Clean           | Clean build artifacts                   |
 | `Ctrl+Shift+R` (Mac: `Cmd+Shift+R`)   | Quick Rebuild         | Clean and rebuild                       |
 | `Ctrl+Shift+T` (Mac: `Cmd+Shift+T`)   | Quick Test            | Run tests                               |
-| `Ctrl+E` (Mac: `Cmd+E`)               | Evaluate Expression   | Open evaluation panel (while debugging) |
+| `Ctrl+Shift+E` (Mac: `Cmd+Shift+E`)   | Evaluate Expression   | Open evaluation panel (while debugging) |
 | `Ctrl+Enter` (Mac: `Cmd+Enter`)       | Send to Debug Console | Evaluate expression (in eval file)      |
 
 ## Requirements
@@ -188,27 +188,54 @@ When you build, rebuild, clean, or test a project, DebugSharp automatically:
 
 ### Debugging
 
-- `C# Debug Hints: Evaluate Expression` - `Ctrl+E` - Open evaluation panel with IntelliSense
+- `C# Debug Hints: Evaluate Expression` - `Ctrl+Shift+E` - Open evaluation panel with IntelliSense
 - `C# Debug Hints: View Object as JSON` - Display object as JSON
 
 ## How It Works
 
-### IntelliSense + Debug Console Integration
+### Scaffold-Based IntelliSense
 
-DebugSharp creates a temporary `.vscode-debug-eval.cs` file in your project folder when debugging starts. This file:
+DebugSharp creates a temporary `.vscode-debug-eval.cs` file in your project folder when you open the evaluation panel. This file contains a **C# scaffold** — a generated class with typed variable declarations matching your current debug scope:
 
-- Gives you full IntelliSense from the C# language server
-- Has access to all your project types
-- Shows runtime variables via a custom completion provider
-- Is automatically cleaned up when debugging stops
+```csharp
+// Auto-generated — do not edit above this line
+#pragma warning disable
+#nullable disable
 
-When you press `Ctrl+Enter`, the expression is sent directly to the Debug Console, which:
+using MyApp.Models;  // from your source file
 
-- Uses the `repl` context that works in lambda scopes
-- Evaluates with full access to closure variables
+class _ { void _() {
+    List<WeatherForecast> forecast = default!;
+    string[] summaries = default!;
+
+    // ── YOUR EXPRESSION (edit below) ──
+    forecast.Where(f => f.TemperatureC > 20).ToList()
+    // ── END EXPRESSION ──
+}}
+```
+
+**How the scaffold is built:**
+
+1. A `DebugAdapterTracker` intercepts DAP `stopped` events to know exactly when and on which thread the debugger pauses
+2. An atomic `stackTrace` → `scopes` → `variables` call chain retrieves all local variables and their **runtime types** (not source-level `var`)
+3. The scaffold generator sanitizes type names (generics, arrays, nullable, anonymous types → `dynamic`) and writes typed declarations
+4. Source-file `using` statements are included; project-level `global using` directives are already project-wide
+5. Roslyn then provides full IntelliSense: member access, LINQ, lambdas, method signatures — everything works
+
+**Why this approach:**
+
+- Full IntelliSense for all project types **and** runtime variables
+- Works perfectly inside lambda scopes (ASP.NET minimal APIs, LINQ callbacks, etc.)
+- Supports chained member access (`list.Where(x => ...)`)
+- No extra configuration — the file is cleaned up when debugging stops
+
+### Expression Evaluation
+
+When you press `Ctrl+Enter`, the expression between the markers is extracted and sent to the Debug Console using the `repl` evaluation context, which:
+
+- Works inside lambda and closure scopes
+- Has full access to captured variables
 - Shows results immediately
-
-**This gives you the best of both worlds:** IntelliSense while editing + powerful evaluation at runtime.
 
 ## Extension Settings
 
