@@ -32,6 +32,7 @@ import {
   addProjectReferenceCommand,
   removeProjectReferenceCommand,
 } from './services/projectReferences';
+import { activateTestExplorer } from './testing/testController';
 import { showNugetPackageManager, initializeNugetPanel } from './ui/panels/nugetManager';
 import { initializeDiagnostics } from './debug/diagnostics';
 import { extractUserExpression, isScaffoldFile } from './debug/scaffoldGenerator';
@@ -303,6 +304,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     },
   );
+
+  // Test explorer
+  activateTestExplorer(context);
 
   // Debug session lifecycle listeners
   const listeners = [
