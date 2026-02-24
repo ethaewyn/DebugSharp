@@ -18,7 +18,10 @@ import {
   addPackageReference,
   removePackageReference,
   updatePackageReference,
+  getCrossProjectReferences,
+  batchCrossProjectCheck,
   InstalledPackage,
+  CrossProjectReference,
 } from '../../services/nugetManager';
 
 let currentNugetPanel: vscode.WebviewPanel | undefined;
@@ -115,11 +118,22 @@ async function handleWebviewMessage(message: any): Promise<void> {
           installedPackages.map((p: InstalledPackage) => [p.id.toLowerCase(), p.version]),
         );
 
-        const enrichedResults = results.map((r: NuGetSearchResult) => ({
-          ...r,
-          isInstalled: installedMap.has(r.id.toLowerCase()),
-          installedVersion: installedMap.get(r.id.toLowerCase()),
-        }));
+        // Check which search results are installed in sibling projects
+        const searchIds = results.map((r: NuGetSearchResult) => r.id);
+        const crossRefs = await batchCrossProjectCheck(currentCsprojPath, searchIds);
+
+        const enrichedResults = results.map((r: NuGetSearchResult) => {
+          const refs = crossRefs.get(r.id.toLowerCase()) || [];
+          return {
+            ...r,
+            isInstalled: installedMap.has(r.id.toLowerCase()),
+            installedVersion: installedMap.get(r.id.toLowerCase()),
+            crossProjectRefs: refs.map(ref => ({
+              projectName: ref.projectName,
+              version: ref.version,
+            })),
+          };
+        });
 
         currentNugetPanel?.webview.postMessage({
           command: 'searchResults',
@@ -170,6 +184,11 @@ async function handleWebviewMessage(message: any): Promise<void> {
 
     case 'install':
       try {
+        currentNugetPanel?.webview.postMessage({
+          command: 'operationStarted',
+          operation: 'install',
+          packageId: message.packageId,
+        });
         const success = await addPackageReference(
           currentCsprojPath,
           message.packageId,
@@ -180,28 +199,54 @@ async function handleWebviewMessage(message: any): Promise<void> {
           await refreshPanel();
         } else {
           vscode.window.showErrorMessage(`Failed to install ${message.packageId}`);
+          currentNugetPanel?.webview.postMessage({
+            command: 'operationFinished',
+            packageId: message.packageId,
+          });
         }
       } catch (error) {
         vscode.window.showErrorMessage(`Installation failed: ${error}`);
+        currentNugetPanel?.webview.postMessage({
+          command: 'operationFinished',
+          packageId: message.packageId,
+        });
       }
       break;
 
     case 'uninstall':
       try {
+        currentNugetPanel?.webview.postMessage({
+          command: 'operationStarted',
+          operation: 'uninstall',
+          packageId: message.packageId,
+        });
         const success = await removePackageReference(currentCsprojPath, message.packageId);
         if (success) {
           vscode.window.showInformationMessage(`Removed ${message.packageId}`);
           await refreshPanel();
         } else {
           vscode.window.showErrorMessage(`Failed to remove ${message.packageId}`);
+          currentNugetPanel?.webview.postMessage({
+            command: 'operationFinished',
+            packageId: message.packageId,
+          });
         }
       } catch (error) {
         vscode.window.showErrorMessage(`Removal failed: ${error}`);
+        currentNugetPanel?.webview.postMessage({
+          command: 'operationFinished',
+          packageId: message.packageId,
+        });
       }
       break;
 
     case 'update':
       try {
+        currentNugetPanel?.webview.postMessage({
+          command: 'operationStarted',
+          operation: 'update',
+          packageId: message.packageId,
+        });
         const success = await updatePackageReference(
           currentCsprojPath,
           message.packageId,
@@ -214,9 +259,34 @@ async function handleWebviewMessage(message: any): Promise<void> {
           await refreshPanel();
         } else {
           vscode.window.showErrorMessage(`Failed to update ${message.packageId}`);
+          currentNugetPanel?.webview.postMessage({
+            command: 'operationFinished',
+            packageId: message.packageId,
+          });
         }
       } catch (error) {
         vscode.window.showErrorMessage(`Update failed: ${error}`);
+        currentNugetPanel?.webview.postMessage({
+          command: 'operationFinished',
+          packageId: message.packageId,
+        });
+      }
+      break;
+
+    case 'crossProjectCheck':
+      try {
+        const refs = await getCrossProjectReferences(currentCsprojPath, message.packageId);
+        currentNugetPanel?.webview.postMessage({
+          command: 'crossProjectResult',
+          packageId: message.packageId,
+          references: refs.map(r => ({ projectName: r.projectName, version: r.version })),
+        });
+      } catch {
+        currentNugetPanel?.webview.postMessage({
+          command: 'crossProjectResult',
+          packageId: message.packageId,
+          references: [],
+        });
       }
       break;
   }

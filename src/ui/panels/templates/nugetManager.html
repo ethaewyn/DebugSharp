@@ -116,10 +116,6 @@
         border-left: 3px solid var(--vscode-charts-blue);
         opacity: 0.85;
       }
-      .package-item.transitive {
-        border-left: 3px solid var(--vscode-charts-blue);
-        opacity: 0.85;
-      }
 
       .package-header {
         display: flex;
@@ -282,6 +278,46 @@
         font-size: 13px;
       }
 
+      .cross-project-refs {
+        margin-top: 6px;
+        font-size: 12px;
+        color: var(--vscode-descriptionForeground);
+      }
+
+      .cross-project-refs .ref-label {
+        color: var(--vscode-charts-yellow);
+        font-weight: 600;
+      }
+
+      .cross-project-refs .ref-item {
+        display: inline;
+      }
+
+      .spinner {
+        display: inline-block;
+        width: 14px;
+        height: 14px;
+        border: 2px solid var(--vscode-descriptionForeground);
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        vertical-align: middle;
+        margin-right: 6px;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .package-actions .busy-indicator {
+        font-size: 13px;
+        color: var(--vscode-descriptionForeground);
+        display: flex;
+        align-items: center;
+      }
+
       .toggle-container input[type='checkbox'] {
         cursor: pointer;
       }
@@ -321,6 +357,13 @@
       const packageVersions = new Map();
       const packageDependencies = new Map();
 
+      // Build cross-project HTML snippet
+      function crossProjectHtml(refs) {
+          if (!refs || refs.length === 0) return '';
+          const items = refs.map(r => `<span class="ref-item">${r.projectName} (${r.version})</span>`).join(', ');
+          return `<div class="cross-project-refs"><span class="ref-label">Also in:</span> ${items}</div>`;
+      }
+
       // Display installed packages
       function displayInstalledPackages() {
           installedCount.textContent = installed.length;
@@ -352,15 +395,18 @@
               ? `<div class="package-version">${isTransitive ? 'Transitive' : 'Installed'}: ${pkg.version || pkg.installedVersion}</div>`
               : `<div class="package-version">Latest: ${pkg.version}</div>`;
 
-        div.innerHTML = `
+          const crossRefInfo = crossProjectHtml(pkg.crossProjectRefs);
+
+          div.innerHTML = `
             <div class="package-header">
                 <div class="package-info">
                     <div class="package-name">${pkg.id}${badge}</div>
                     ${versionInfo}
                     <div class="package-description">${pkg.description || 'No description available'}</div>
                     ${pkg.authors ? `<div class="stats"><div class="stat-item">By: ${pkg.authors}</div></div>` : ''}
+                    ${crossRefInfo}
                 </div>
-                <div class="package-actions">
+                <div class="package-actions" data-actions-for="${pkg.id}">
                     ${createActionButtons(pkg, isInstalled, isTransitive)}
                 </div>
             </div>
@@ -374,7 +420,7 @@
                 </div>
                 <div class="dependencies hidden" data-deps-for="${pkg.id}-selector"></div>
             </div>
-        `;
+          `;
 
           return div;
       }
@@ -382,7 +428,6 @@
       // Create action buttons based on installation status
       function createActionButtons(pkg, isInstalled, isTransitive) {
           if (isTransitive) {
-              // Transitive packages can't be directly managed
               return '<button class="secondary" disabled>Transitive Dependency</button>';
           }
           if (isInstalled) {
@@ -394,6 +439,14 @@
               return `
                   <button onclick="toggleVersionSelector('${pkg.id}')">Install</button>
               `;
+          }
+      }
+
+      // Show busy spinner in action area
+      function showBusy(packageId, label) {
+          const actionsDiv = document.querySelector(`[data-actions-for="${packageId}"]`);
+          if (actionsDiv) {
+              actionsDiv.innerHTML = `<span class="busy-indicator"><span class="spinner"></span>${label}...</span>`;
           }
       }
 
@@ -503,6 +556,7 @@
           const version = select?.value;
           if (!version) return;
 
+          showBusy(packageId, 'Installing');
           vscode.postMessage({
               command: 'install',
               packageId: packageId,
@@ -512,6 +566,7 @@
 
       // Uninstall a package
       window.uninstallPackage = function(packageId) {
+          showBusy(packageId, 'Removing');
           vscode.postMessage({
               command: 'uninstall',
               packageId: packageId
@@ -551,13 +606,36 @@
                   packageVersions.set(message.packageId, message.versions);
                   populateVersionSelect(message.packageId, message.versions);
                   break;
-              case 'dependenciesResult':
+              case 'dependenciesResult': {
                   const key = `${message.packageId}@${message.version}`;
                   packageDependencies.set(key, message.dependencies);
-                  // Try to display in both locations
                   displayDependencies(message.packageId, message.version, message.dependencies, false);
                   displayDependencies(message.packageId, message.version, message.dependencies, true);
                   break;
+              }
+              case 'operationStarted':
+                  showBusy(message.packageId, message.operation === 'uninstall' ? 'Removing' : 'Installing');
+                  break;
+              case 'operationFinished':
+                  // Panel will be refreshed on success; this handles error recovery
+                  break;
+              case 'crossProjectResult': {
+                  // Update the cross-project refs display for a specific package
+                  const items = document.querySelectorAll(`[data-package-id="${message.packageId}"]`);
+                  items.forEach(item => {
+                      let refsDiv = item.querySelector('.cross-project-refs');
+                      const html = crossProjectHtml(message.references);
+                      if (html) {
+                          if (!refsDiv) {
+                              const info = item.querySelector('.package-info');
+                              if (info) info.insertAdjacentHTML('beforeend', html);
+                          } else {
+                              refsDiv.outerHTML = html;
+                          }
+                      }
+                  });
+                  break;
+              }
           }
       });
 
@@ -591,7 +669,6 @@
                 if (depsDiv) {
                     if (showAll) {
                         depsDiv.style.display = 'block';
-                        // Load dependencies if not already loaded
                         const pkg = installed.find(p => p.id === packageId);
                         if (pkg && depsDiv.innerHTML === '') {
                             depsDiv.innerHTML = '<div class="loading">Loading dependencies...</div>';

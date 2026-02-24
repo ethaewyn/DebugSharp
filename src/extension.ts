@@ -28,6 +28,10 @@ import {
   generateLaunchConfigurations,
 } from './debug/launcher';
 import { registerVariableCompletionProvider, updateDebugContext } from './ui/completionProvider';
+import {
+  addProjectReferenceCommand,
+  removeProjectReferenceCommand,
+} from './services/projectReferences';
 import { showNugetPackageManager, initializeNugetPanel } from './ui/panels/nugetManager';
 import { initializeDiagnostics } from './debug/diagnostics';
 import { extractUserExpression, isScaffoldFile } from './debug/scaffoldGenerator';
@@ -276,6 +280,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   );
 
+  // Command: Add project reference
+  const addProjectRefCommand = vscode.commands.registerCommand(
+    'csharpDebugHints.addProjectReference',
+    async (uri: vscode.Uri) => {
+      if (uri && uri.fsPath) {
+        await addProjectReferenceCommand(uri);
+      } else {
+        vscode.window.showErrorMessage('No .csproj file selected');
+      }
+    },
+  );
+
+  // Command: Remove project reference
+  const removeProjectRefCommand = vscode.commands.registerCommand(
+    'csharpDebugHints.removeProjectReference',
+    async (uri: vscode.Uri) => {
+      if (uri && uri.fsPath) {
+        await removeProjectReferenceCommand(uri);
+      } else {
+        vscode.window.showErrorMessage('No .csproj file selected');
+      }
+    },
+  );
+
   // Debug session lifecycle listeners
   const listeners = [
     vscode.debug.onDidChangeActiveDebugSession(session => {
@@ -314,6 +342,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     quickTestCommand,
     generateLaunchCommand,
     manageNugetCommand,
+    addProjectRefCommand,
+    removeProjectRefCommand,
     ...listeners,
   );
 }

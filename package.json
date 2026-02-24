@@ -90,6 +90,16 @@
         "command": "csharpDebugHints.manageNugetPackages",
         "title": "Manage NuGet Packages",
         "category": "C# Debug Hints"
+      },
+      {
+        "command": "csharpDebugHints.addProjectReference",
+        "title": "Add Project Reference",
+        "category": "C# Debug Hints"
+      },
+      {
+        "command": "csharpDebugHints.removeProjectReference",
+        "title": "Remove Project Reference",
+        "category": "C# Debug Hints"
       }
     ],
     "menus": {
@@ -98,6 +108,16 @@
           "command": "csharpDebugHints.manageNugetPackages",
           "when": "resourceExtname == .csproj",
           "group": "nuget@1"
+        },
+        {
+          "command": "csharpDebugHints.addProjectReference",
+          "when": "resourceExtname == .csproj",
+          "group": "nuget@2"
+        },
+        {
+          "command": "csharpDebugHints.removeProjectReference",
+          "when": "resourceExtname == .csproj",
+          "group": "nuget@3"
         }
       ],
       "editor/context": [
@@ -159,12 +179,8 @@
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@types/vscode": "^1.108.1",
-    "@types/xml2js": "^0.4.14",
     "@vscode/vsce": "^3.7.1",
     "prettier": "^3.8.1",
     "typescript": "^5.9.3"
-  },
-  "dependencies": {
-    "xml2js": "^0.6.2"
   }
 }
