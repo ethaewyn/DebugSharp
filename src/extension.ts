@@ -17,6 +17,7 @@ import {
 } from './ui/panels/evaluation';
 import {
   quickLaunch,
+  launchProject,
   quickBuild,
   quickClean,
   quickRebuild,
@@ -190,29 +191,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   );
 
-  // Command: Quick launch
-  const quickLaunchCommand = vscode.commands.registerCommand(
-    'debugSharp.quickLaunch',
+  // Command: Quick launch (re-run last or infer from active file)
+  const quickLaunchCommand = vscode.commands.registerCommand('debugSharp.quickLaunch', async () => {
+    await quickLaunch();
+  });
+
+  // Command: Launch project (full picker)
+  const launchProjectCommand = vscode.commands.registerCommand(
+    'debugSharp.launchProject',
     async () => {
-      await quickLaunch();
+      await launchProject();
     },
   );
 
   // Command: Quick build
-  const quickBuildCommand = vscode.commands.registerCommand(
-    'debugSharp.quickBuild',
-    async () => {
-      await quickBuild();
-    },
-  );
+  const quickBuildCommand = vscode.commands.registerCommand('debugSharp.quickBuild', async () => {
+    await quickBuild();
+  });
 
   // Command: Quick clean
-  const quickCleanCommand = vscode.commands.registerCommand(
-    'debugSharp.quickClean',
-    async () => {
-      await quickClean();
-    },
-  );
+  const quickCleanCommand = vscode.commands.registerCommand('debugSharp.quickClean', async () => {
+    await quickClean();
+  });
 
   // Command: Quick rebuild
   const quickRebuildCommand = vscode.commands.registerCommand(
@@ -223,12 +223,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   // Command: Quick test
-  const quickTestCommand = vscode.commands.registerCommand(
-    'debugSharp.quickTest',
-    async () => {
-      await quickTest();
-    },
-  );
+  const quickTestCommand = vscode.commands.registerCommand('debugSharp.quickTest', async () => {
+    await quickTest();
+  });
 
   // Command: Generate launch configurations
   const generateLaunchCommand = vscode.commands.registerCommand(
@@ -294,6 +291,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     evaluateCommand,
     evaluateInEditorCommand,
     quickLaunchCommand,
+    launchProjectCommand,
     quickBuildCommand,
     quickCleanCommand,
     quickRebuildCommand,

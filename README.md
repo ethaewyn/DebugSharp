@@ -6,7 +6,8 @@ All-in-one C# development extension for Visual Studio Code — IntelliSense-powe
 
 ### Project Management
 
-- **Quick Launch** (`Ctrl+Shift+F5`) - Instantly debug any C# project with automatic building
+- **Quick Launch** (`Ctrl+Shift+Q`) - Smart launch: re-runs last project, or infers from active file
+- **Launch Project** (`Ctrl+Shift+F5`) - Full project picker with launch profile selection
 - **Quick Build** (`Ctrl+Shift+B`) - Build any project or solution with errors reported to Problems panel
 - **Quick Clean** (`Ctrl+Shift+K`) - Clean build artifacts, clears Problems panel on success
 - **Quick Rebuild** (`Ctrl+Shift+R`) - Clean and rebuild with automatic error detection
@@ -35,9 +36,17 @@ All-in-one C# development extension for Visual Studio Code — IntelliSense-powe
 
 ### Quick Launch & Build Commands
 
-**Quick Launch** - Build and debug any C# project:
+**Quick Launch** - Instantly re-run or smart-detect your project:
 
-1. Press `Ctrl+Shift+F5` (Mac: `Cmd+Shift+F5`) or run command "Quick Launch Project"
+1. Press `Ctrl+Shift+Q` (Mac: `Cmd+Shift+Q`)
+2. If you have a last launched project and the active file belongs to it → launches immediately
+3. If a last launched project exists but the active file is different → asks if you want to re-run it or choose another
+4. If no last project but a `.cs` file is open → launches the project that contains it
+5. Otherwise, falls back to the full project picker
+
+**Launch Project** - Full project picker with profile selection:
+
+1. Press `Ctrl+Shift+F5` (Mac: `Cmd+Shift+F5`) or run command "Launch Project"
 2. Select your project from the list (last used appears first)
 3. For ASP.NET projects with multiple launch profiles, choose one
 4. Project builds and debugging starts automatically
@@ -181,15 +190,16 @@ When you build, rebuild, clean, or test a project, DebugSharp automatically:
 
 ## Keyboard Shortcuts
 
-| Shortcut                              | Command               | Description                             |
-| ------------------------------------- | --------------------- | --------------------------------------- |
-| `Ctrl+Shift+F5` (Mac: `Cmd+Shift+F5`) | Quick Launch          | Build and debug project                 |
-| `Ctrl+Shift+B` (Mac: `Cmd+Shift+B`)   | Quick Build           | Build project or solution               |
-| `Ctrl+Shift+K` (Mac: `Cmd+Shift+K`)   | Quick Clean           | Clean build artifacts                   |
-| `Ctrl+Shift+R` (Mac: `Cmd+Shift+R`)   | Quick Rebuild         | Clean and rebuild                       |
-| `Ctrl+Shift+T` (Mac: `Cmd+Shift+T`)   | Quick Test            | Run tests                               |
-| `Ctrl+Shift+E` (Mac: `Cmd+Shift+E`)   | Evaluate Expression   | Open evaluation panel (while debugging) |
-| `Ctrl+Enter` (Mac: `Cmd+Enter`)       | Send to Debug Console | Evaluate expression (in eval file)      |
+| Shortcut                              | Command               | Description                                |
+| ------------------------------------- | --------------------- | ------------------------------------------ |
+| `Ctrl+Shift+Q` (Mac: `Cmd+Shift+Q`)   | Quick Launch          | Smart launch (re-run last or infer)        |
+| `Ctrl+Shift+F5` (Mac: `Cmd+Shift+F5`) | Launch Project        | Full project picker with profile selection |
+| `Ctrl+Shift+B` (Mac: `Cmd+Shift+B`)   | Quick Build           | Build project or solution                  |
+| `Ctrl+Shift+K` (Mac: `Cmd+Shift+K`)   | Quick Clean           | Clean build artifacts                      |
+| `Ctrl+Shift+R` (Mac: `Cmd+Shift+R`)   | Quick Rebuild         | Clean and rebuild                          |
+| `Ctrl+Shift+T` (Mac: `Cmd+Shift+T`)   | Quick Test            | Run tests                                  |
+| `Ctrl+Shift+E` (Mac: `Cmd+Shift+E`)   | Evaluate Expression   | Open evaluation panel (while debugging)    |
+| `Ctrl+Enter` (Mac: `Cmd+Enter`)       | Send to Debug Console | Evaluate expression (in eval file)         |
 
 ## Requirements
 

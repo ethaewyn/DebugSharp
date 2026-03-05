@@ -17,6 +17,9 @@ import {
 // Store the last used project/solution path for quick access
 let lastUsedItemPath: string | undefined;
 
+// Store the last launched project path for quick re-launch
+let lastLaunchedProjectPath: string | undefined;
+
 interface ProjectInfo {
   name: string;
   path: string;
@@ -606,9 +609,127 @@ function generateDebugConfig(
 }
 
 /**
- * Quick launch: Show project picker and debug
+ * Find the project that contains the currently open file
+ */
+async function findProjectForActiveFile(): Promise<ProjectInfo | undefined> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.uri.scheme !== 'file') {
+    return undefined;
+  }
+
+  const filePath = editor.document.uri.fsPath;
+  if (!filePath.endsWith('.cs')) {
+    return undefined;
+  }
+
+  const projects = await findRunnableProjects();
+  // Find the project whose directory is an ancestor of the open file
+  // Pick the deepest match (most specific project)
+  let bestMatch: ProjectInfo | undefined;
+  let bestDepth = -1;
+
+  for (const project of projects) {
+    const projectDir = path.dirname(project.path);
+    if (filePath.startsWith(projectDir + path.sep) || filePath.startsWith(projectDir + '/')) {
+      const depth = projectDir.split(path.sep).length;
+      if (depth > bestDepth) {
+        bestDepth = depth;
+        bestMatch = project;
+      }
+    }
+  }
+
+  return bestMatch;
+}
+
+/**
+ * Launch a project (build + debug), reusing last profile if available
+ */
+async function launchProjectDirect(project: ProjectInfo): Promise<void> {
+  const dllPath = await buildProject(project);
+  await new Promise(resolve => setTimeout(resolve, 500));
+
+  let finalDllPath = dllPath;
+  if (!finalDllPath) {
+    finalDllPath = findBuiltDllPath(project);
+  }
+
+  if (!finalDllPath) {
+    vscode.window.showErrorMessage(
+      `Could not find built DLL for ${project.name}. Build may have failed.`,
+    );
+    return;
+  }
+
+  const config = generateDebugConfig(project, undefined, finalDllPath);
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(project.path));
+  lastUsedItemPath = project.path;
+  lastLaunchedProjectPath = project.path;
+  await vscode.debug.startDebugging(workspaceFolder, config);
+}
+
+/**
+ * Quick launch: Re-run last project or infer from active editor
  */
 export async function quickLaunch(): Promise<void> {
+  const projects = await findRunnableProjects();
+
+  if (projects.length === 0) {
+    vscode.window.showWarningMessage('No runnable C# projects found in workspace');
+    return;
+  }
+
+  const activeProject = await findProjectForActiveFile();
+  const lastProject = lastLaunchedProjectPath
+    ? projects.find(p => p.path === lastLaunchedProjectPath)
+    : undefined;
+
+  // If active file belongs to the last launched project, just run it
+  if (lastProject && activeProject && activeProject.path === lastProject.path) {
+    await launchProjectDirect(lastProject);
+    return;
+  }
+
+  // If there's a last launched project (but active file is from a different project or no file open)
+  if (lastProject) {
+    const choice = await vscode.window.showQuickPick(
+      [
+        {
+          label: `$(debug-start) ${lastProject.name}`,
+          description: 'Last launched',
+          value: 'last' as const,
+        },
+        { label: '$(folder-opened) Choose another project...', value: 'other' as const },
+      ],
+      { placeHolder: `Run ${lastProject.name} again?` },
+    );
+
+    if (!choice) {
+      return;
+    }
+
+    if (choice.value === 'last') {
+      await launchProjectDirect(lastProject);
+      return;
+    }
+
+    // User chose "other" — fall through to active file check, then full picker
+  }
+
+  // Try to launch the project associated with the active file
+  if (activeProject) {
+    await launchProjectDirect(activeProject);
+    return;
+  }
+
+  // No last project and no active file match — fall back to full project picker
+  await launchProject();
+}
+
+/**
+ * Launch project: Show project picker and debug
+ */
+export async function launchProject(): Promise<void> {
   const projects = await findRunnableProjects();
 
   if (projects.length === 0) {
@@ -648,6 +769,7 @@ export async function quickLaunch(): Promise<void> {
 
   const project = selectedProject.project;
   lastUsedItemPath = project.path;
+  lastLaunchedProjectPath = project.path;
   let profileName: string | undefined;
 
   // Step 2: If the project has launch profiles, show profile picker

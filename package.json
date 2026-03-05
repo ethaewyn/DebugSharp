@@ -2,7 +2,7 @@
   "name": "debugsharp",
   "displayName": "DebugSharp",
   "description": "Enhanced C# debugging with IntelliSense expression evaluation, Test Explorer, NuGet & project reference management, and build/test commands with Problems panel integration",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "publisher": "Ethaewyn",
   "icon": "icon.png",
   "categories": [
@@ -49,7 +49,13 @@
       },
       {
         "command": "debugSharp.quickLaunch",
-        "title": "Quick Launch Project",
+        "title": "Quick Launch",
+        "category": "DebugSharp",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "debugSharp.launchProject",
+        "title": "Launch Project",
         "category": "DebugSharp",
         "icon": "$(debug-start)"
       },
@@ -139,6 +145,11 @@
       },
       {
         "command": "debugSharp.quickLaunch",
+        "key": "ctrl+shift+q",
+        "mac": "cmd+shift+q"
+      },
+      {
+        "command": "debugSharp.launchProject",
         "key": "ctrl+shift+f5",
         "mac": "cmd+shift+f5"
       },
