@@ -1,12 +1,11 @@
 /**
  * C# Debug Hints Extension
  *
- * Provides inline variable hints, object inspection, and expression evaluation
- * during C# debugging sessions in VS Code.
+ * Provides IntelliSense-powered expression evaluation, project management,
+ * and test explorer integration for C# debugging in VS Code.
  */
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import { DebugPoller } from './debug/poller';
 import { getCurrentFrameId } from './debug/dap';
 import {
   showEvaluationPanel,
@@ -16,9 +15,6 @@ import {
   deleteTempFile,
   updateEvalScaffold,
 } from './ui/panels/evaluation';
-import { showObjectJson, showObjectPickerForLine } from './ui/panels/objectViewer';
-import { DebugInlayHintsProvider } from './ui/inlayHints/provider';
-import { initializeWebview } from './ui/panels/webview';
 import {
   quickLaunch,
   quickBuild,
@@ -104,7 +100,6 @@ function parseExpression(rawText: string): string {
  */
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   // Initialize webview modules with context
-  initializeWebview(context);
   initializeEvaluationPanel(context);
   initializeNugetPanel(context);
 
@@ -117,12 +112,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Register variable completion provider for evaluation file
   registerVariableCompletionProvider(context);
 
-  const inlayHintsProvider = new DebugInlayHintsProvider();
-  const poller = new DebugPoller(inlayHintsProvider);
-
   // Register a DAP tracker to reliably detect stopped state and update the scaffold.
-  // This replaces the poller-based approach which suffered from stale frame IDs
-  // (each stackTrace call allocates new IDs, invalidating variable references).
   const trackerDisposable = registerDebugTracker(async (session, threadId) => {
     const resolvedFrameId = await updateEvalScaffold(session, 0, threadId);
     if (resolvedFrameId !== undefined) {
@@ -131,32 +121,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   });
 
-  const inlayHintsDisposable = vscode.languages.registerInlayHintsProvider(
-    { language: 'csharp', scheme: 'file' },
-    inlayHintsProvider,
-  );
-
-  // Command: Show object as JSON (called from inlay hint click)
-  const showJsonCommand = vscode.commands.registerCommand(
-    'csharpDebugHints.showObjectJson',
-    async (varName: string) => {
-      await showObjectJson(varName);
-    },
-  );
-
-  // Command: View object JSON (triggered manually)
-  const viewObjectCommand = vscode.commands.registerCommand(
-    'csharpDebugHints.viewObjectJson',
-    async () => {
-      await showObjectPickerForLine();
-    },
-  );
-
   // Command: Evaluate expression
   const evaluateCommand = vscode.commands.registerCommand(
-    'csharpDebugHints.evaluateExpression',
+    'debugSharp.evaluateExpression',
     async () => {
-      const session = poller.getSession();
+      const session = vscode.debug.activeDebugSession;
       if (!session) {
         vscode.window.showWarningMessage('No active debug session');
         return;
@@ -182,9 +151,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Command: Evaluate in already-open editor (keyboard shortcut - Ctrl+Enter)
   const evaluateInEditorCommand = vscode.commands.registerCommand(
-    'csharpDebugHints.evaluateInEditor',
+    'debugSharp.evaluateInEditor',
     async () => {
-      const session = poller.getSession();
+      const session = vscode.debug.activeDebugSession;
       if (!session) {
         vscode.window.showWarningMessage('No active debug session');
         return;
@@ -223,7 +192,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Command: Quick launch
   const quickLaunchCommand = vscode.commands.registerCommand(
-    'csharpDebugHints.quickLaunch',
+    'debugSharp.quickLaunch',
     async () => {
       await quickLaunch();
     },
@@ -231,7 +200,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Command: Quick build
   const quickBuildCommand = vscode.commands.registerCommand(
-    'csharpDebugHints.quickBuild',
+    'debugSharp.quickBuild',
     async () => {
       await quickBuild();
     },
@@ -239,7 +208,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Command: Quick clean
   const quickCleanCommand = vscode.commands.registerCommand(
-    'csharpDebugHints.quickClean',
+    'debugSharp.quickClean',
     async () => {
       await quickClean();
     },
@@ -247,7 +216,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Command: Quick rebuild
   const quickRebuildCommand = vscode.commands.registerCommand(
-    'csharpDebugHints.quickRebuild',
+    'debugSharp.quickRebuild',
     async () => {
       await quickRebuild();
     },
@@ -255,7 +224,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Command: Quick test
   const quickTestCommand = vscode.commands.registerCommand(
-    'csharpDebugHints.quickTest',
+    'debugSharp.quickTest',
     async () => {
       await quickTest();
     },
@@ -263,7 +232,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Command: Generate launch configurations
   const generateLaunchCommand = vscode.commands.registerCommand(
-    'csharpDebugHints.generateLaunchConfigurations',
+    'debugSharp.generateLaunchConfigurations',
     async () => {
       await generateLaunchConfigurations();
     },
@@ -271,7 +240,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Command: Manage NuGet packages
   const manageNugetCommand = vscode.commands.registerCommand(
-    'csharpDebugHints.manageNugetPackages',
+    'debugSharp.manageNugetPackages',
     async (uri: vscode.Uri) => {
       if (uri && uri.fsPath) {
         await showNugetPackageManager(uri.fsPath);
@@ -283,7 +252,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Command: Add project reference
   const addProjectRefCommand = vscode.commands.registerCommand(
-    'csharpDebugHints.addProjectReference',
+    'debugSharp.addProjectReference',
     async (uri: vscode.Uri) => {
       if (uri && uri.fsPath) {
         await addProjectReferenceCommand(uri);
@@ -295,7 +264,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Command: Remove project reference
   const removeProjectRefCommand = vscode.commands.registerCommand(
-    'csharpDebugHints.removeProjectReference',
+    'debugSharp.removeProjectReference',
     async (uri: vscode.Uri) => {
       if (uri && uri.fsPath) {
         await removeProjectReferenceCommand(uri);
@@ -310,22 +279,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Debug session lifecycle listeners
   const listeners = [
-    vscode.debug.onDidChangeActiveDebugSession(session => {
-      poller.setSession(session);
-      if (session) {
-        poller.startPolling();
-      } else {
-        poller.stopPolling();
-      }
-    }),
     vscode.debug.onDidStartDebugSession(async session => {
-      poller.setSession(session);
-      poller.startPolling();
       await createTempFile(session);
     }),
     vscode.debug.onDidTerminateDebugSession(() => {
-      poller.setSession(undefined);
-      poller.stopPolling();
       updateDebugContext(undefined, undefined);
       clearStoppedState();
       deleteTempFile();
@@ -333,10 +290,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   ];
 
   context.subscriptions.push(
-    inlayHintsDisposable,
     trackerDisposable,
-    showJsonCommand,
-    viewObjectCommand,
     evaluateCommand,
     evaluateInEditorCommand,
     quickLaunchCommand,

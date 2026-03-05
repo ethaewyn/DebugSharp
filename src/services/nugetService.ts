@@ -6,18 +6,6 @@
  */
 import * as https from 'https';
 
-export interface NuGetPackage {
-  id: string;
-  version: string;
-  description: string;
-  authors: string[];
-  totalDownloads: number;
-  versions: string[];
-  iconUrl?: string;
-  projectUrl?: string;
-  licenseUrl?: string;
-}
-
 export interface NuGetSearchResult {
   id: string;
   version: string;
@@ -28,7 +16,7 @@ export interface NuGetSearchResult {
   versions?: string[];
 }
 
-export interface PackageVersion {
+interface PackageVersion {
   version: string;
   dependencies: PackageDependency[];
 }
@@ -204,41 +192,5 @@ export async function getPackageMetadata(
       version: version,
       dependencies: [],
     };
-  }
-}
-
-/**
- * Get detailed package information
- * @param packageId The package ID
- */
-export async function getPackageDetails(packageId: string): Promise<NuGetPackage | null> {
-  try {
-    const versions = await getPackageVersions(packageId);
-    if (versions.length === 0) {
-      return null;
-    }
-
-    const latestVersion = versions[versions.length - 1];
-    const registrationUrl = `https://api.nuget.org/v3/registration5-semver1/${packageId.toLowerCase()}/${latestVersion.toLowerCase()}.json`;
-    const result = await httpsGet(registrationUrl);
-
-    const catalogEntry = result.catalogEntry || result;
-
-    return {
-      id: packageId,
-      version: latestVersion,
-      description: catalogEntry.description || '',
-      authors: catalogEntry.authors
-        ? catalogEntry.authors.split(',').map((a: string) => a.trim())
-        : [],
-      totalDownloads: 0,
-      versions: versions,
-      iconUrl: catalogEntry.iconUrl,
-      projectUrl: catalogEntry.projectUrl,
-      licenseUrl: catalogEntry.licenseUrl,
-    };
-  } catch (error) {
-    console.error('Error fetching package details:', error);
-    return null;
   }
 }

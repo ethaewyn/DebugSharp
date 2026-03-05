@@ -1,6 +1,6 @@
 # DebugSharp
 
-Enhanced C# debugging experience with inline evaluation, IntelliSense-powered expression editing, and advanced debug features for Visual Studio Code.
+All-in-one C# development extension for Visual Studio Code — IntelliSense-powered expression evaluation, Test Explorer integration, NuGet & project reference management, and build/test commands with Problems panel reporting.
 
 ## Features
 
@@ -13,12 +13,20 @@ Enhanced C# debugging experience with inline evaluation, IntelliSense-powered ex
 - **Quick Test** (`Ctrl+Shift+T`) - Run tests with failures shown in Problems panel
 - **Problems Panel Integration** - All build, test errors appear with clickable file/line links
 - **NuGet Package Manager** - Visual package management (right-click `.csproj`)
+- **Project References** - Add/remove project references with transitive duplicate detection (right-click `.csproj`)
 - **Smart project detection** - Remembers last used project for quick access
+
+### Testing
+
+- **Test Explorer Integration** - Native VS Code Test Explorer with tree view (project → namespace → class → method)
+- **Run & Debug Tests** - Run tests from the Test Explorer sidebar or debug them with breakpoints
+- **Lazy Discovery** - Tests are discovered on demand via `dotnet test --list-tests`
+- **TRX Result Parsing** - Accurate pass/fail/skip status with durations and failure messages
+- **File Watching** - Automatically refreshes tests when `.cs` or `.csproj` files change
 
 ### Debugging Features
 
 - **IntelliSense Expression Evaluator** - Edit C# expressions with full IntelliSense (types + variables)
-- **JSON Object Viewer** - View complex objects as formatted JSON
 - **Expression History** - Track all evaluated expressions in a compact history panel
 - **Lambda Support** - Works in lambda scopes (ASP.NET minimal APIs, LINQ, etc.)
 - **Auto Debug Configuration** - Generate launch.json for all projects
@@ -115,6 +123,33 @@ When you build, rebuild, clean, or test a project, DebugSharp automatically:
    - Package dependencies viewer
    - Visual indicators for installed packages
 
+### Project References
+
+**Add or remove project-to-project references:**
+
+1. In Explorer, right-click any `.csproj` file
+2. Select "Add Project Reference" or "Remove Project Reference"
+3. A Quick Pick list shows available projects:
+   - Already-referenced projects are marked
+   - Transitive references (indirect dependencies) are labeled to prevent duplicates
+   - Select one or more projects to add/remove
+4. Uses `dotnet add reference` / `dotnet remove reference` under the hood (preserves csproj formatting)
+
+### Test Explorer
+
+**Run and debug tests from VS Code's Test Explorer sidebar:**
+
+1. Open the **Testing** sidebar (click the beaker icon in the Activity Bar)
+2. Test projects are discovered automatically from your workspace
+3. Expand a project node to discover its tests (grouped by namespace → class → method)
+4. Click the **Run** button next to any test, class, namespace, or project to run it
+5. Click the **Debug** button to run with breakpoints
+6. Results show pass/fail/skip icons with durations
+7. Failed tests display error messages and stack traces inline
+8. Tests automatically refresh when you edit `.cs` or `.csproj` files
+
+**Supported frameworks:** xUnit, NUnit, MSTest
+
 ### Evaluate Expressions with IntelliSense
 
 **During debugging:**
@@ -135,14 +170,6 @@ When you build, rebuild, clean, or test a project, DebugSharp automatically:
 - Full IntelliSense for all types and variables
 - Works perfectly in lambda scopes
 - Expression history tracking
-
-### View Objects as JSON
-
-**During debugging:**
-
-1. Select a variable or expression
-2. Right-click and select "View Object as JSON"
-3. Explore the object structure in formatted JSON
 
 ### Generate Debug Configurations
 
@@ -185,11 +212,12 @@ When you build, rebuild, clean, or test a project, DebugSharp automatically:
 - `C# Debug Hints: Quick Test Project` - `Ctrl+Shift+T` - Run tests
 - `C# Debug Hints: Generate Debug Configurations` - Auto-generate launch.json
 - `C# Debug Hints: Manage NuGet Packages` - Visual NuGet package management
+- `C# Debug Hints: Add Project Reference` - Add project-to-project references
+- `C# Debug Hints: Remove Project Reference` - Remove project references
 
 ### Debugging
 
 - `C# Debug Hints: Evaluate Expression` - `Ctrl+Shift+E` - Open evaluation panel with IntelliSense
-- `C# Debug Hints: View Object as JSON` - Display object as JSON
 
 ## How It Works
 
@@ -236,6 +264,19 @@ When you press `Ctrl+Enter`, the expression between the markers is extracted and
 - Works inside lambda and closure scopes
 - Has full access to captured variables
 - Shows results immediately
+
+## Keybinding Notes
+
+Some shortcuts override VS Code defaults to provide a Visual Studio-like workflow:
+
+| DebugSharp Shortcut            | VS Code Default It Replaces |
+| ------------------------------ | --------------------------- |
+| `Ctrl+Shift+B` (Quick Build)   | Run Build Task              |
+| `Ctrl+Shift+T` (Quick Test)    | Reopen Closed Editor        |
+| `Ctrl+Shift+K` (Quick Clean)   | Delete Line                 |
+| `Ctrl+Shift+F5` (Quick Launch) | Debug: Restart              |
+
+You can remap any of these in **File → Preferences → Keyboard Shortcuts**.
 
 ## Extension Settings
 

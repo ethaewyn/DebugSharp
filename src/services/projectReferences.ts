@@ -127,8 +127,6 @@ export async function addProjectReferenceCommand(csprojUri: vscode.Uri): Promise
       label: name,
       description,
       projectPath: absPath,
-      // Sort referenced items to the bottom
-      kind: isDirect || isTransitive ? undefined : undefined,
     });
   }
 

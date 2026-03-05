@@ -40,6 +40,60 @@ function isSolution(item: BuildableItem): item is SolutionInfo {
   return 'projectCount' in item;
 }
 
+// ─── Build Output Channel ────────────────────────────────────────────
+
+let buildOutputChannel: vscode.OutputChannel | undefined;
+
+function getBuildOutputChannel(): vscode.OutputChannel {
+  if (!buildOutputChannel) {
+    buildOutputChannel = vscode.window.createOutputChannel('C# Build');
+  }
+  return buildOutputChannel;
+}
+
+/**
+ * Run a shell command, streaming output to the C# Build output channel.
+ * Replaces the old terminal+exec dual-execution approach so each command runs only once.
+ */
+function runDotnetVisual(
+  command: string,
+  cwd: string,
+  label: string,
+): Promise<{ success: boolean; output: string }> {
+  return new Promise(resolve => {
+    const channel = getBuildOutputChannel();
+    channel.show(true);
+    channel.appendLine(`▶ ${label}`);
+    channel.appendLine(`> ${command}`);
+    channel.appendLine('');
+
+    const proc = child_process.spawn(command, { cwd, shell: true });
+    let output = '';
+
+    proc.stdout.on('data', (d: Buffer) => {
+      const s = d.toString();
+      output += s;
+      channel.append(s);
+    });
+    proc.stderr.on('data', (d: Buffer) => {
+      const s = d.toString();
+      output += s;
+      channel.append(s);
+    });
+
+    proc.on('close', code => {
+      channel.appendLine(code === 0 ? '✓ Done' : '✗ Failed');
+      channel.appendLine('');
+      resolve({ success: code === 0, output });
+    });
+    proc.on('error', err => {
+      channel.appendLine(`Error: ${err.message}`);
+      channel.appendLine('');
+      resolve({ success: false, output: err.message });
+    });
+  });
+}
+
 /**
  * Find all runnable C# projects in the workspace
  */
@@ -241,318 +295,189 @@ async function analyzeProject(projectPath: string): Promise<ProjectInfo | null> 
 /**
  * Clean a project using dotnet clean
  */
-export async function cleanProject(
-  project: ProjectInfo,
-  autoClose: boolean = false,
-): Promise<void> {
+export async function cleanProject(project: ProjectInfo): Promise<void> {
   const projectDir = path.dirname(project.path);
-
-  // Clear diagnostics when cleaning
   clearDiagnostics();
 
-  vscode.window.showInformationMessage(`Cleaning ${project.name}...`);
+  const result = await runDotnetVisual(
+    `dotnet clean "${project.path}"`,
+    projectDir,
+    `Clean ${project.name}`,
+  );
 
-  return new Promise<void>((resolve, reject) => {
-    // Show terminal for output visibility
-    const terminal = vscode.window.createTerminal({
-      name: `Clean ${project.name}`,
-      cwd: projectDir,
-    });
-    terminal.show();
-    terminal.sendText(`dotnet clean "${project.path}"`);
+  if (!result.success) {
+    if (result.output) {
+      const diagnosticMap = parseBuildOutput(result.output, projectDir);
+      updateDiagnostics(diagnosticMap);
+    }
+    vscode.window.showErrorMessage(`Clean failed: ${project.name}`);
+    throw new Error('Clean failed');
+  }
 
-    // Also capture output for diagnostics
-    const process = child_process.exec(
-      `dotnet clean "${project.path}"`,
-      { cwd: projectDir, maxBuffer: 1024 * 1024 * 10 },
-      (error, stdout, stderr) => {
-        const output = stdout + stderr;
-
-        if (error && error.code !== 0) {
-          // Only parse diagnostics on failure
-          if (output) {
-            const diagnosticMap = parseBuildOutput(output, projectDir);
-            updateDiagnostics(diagnosticMap);
-          }
-          vscode.window.showErrorMessage(`Clean failed: ${project.name}`);
-          reject(new Error('Clean failed'));
-        } else {
-          // Explicitly clear diagnostics again on successful clean
-          clearDiagnostics();
-          vscode.window.showInformationMessage(`✓ Clean succeeded: ${project.name}`);
-          resolve();
-        }
-      },
-    );
-  });
+  clearDiagnostics();
+  vscode.window.showInformationMessage(`✓ Clean succeeded: ${project.name}`);
 }
 
 /**
  * Build a project using dotnet build
  */
-export async function buildProject(
-  project: ProjectInfo,
-  autoClose: boolean = false,
-): Promise<string | null> {
+export async function buildProject(project: ProjectInfo): Promise<string | null> {
   const projectDir = path.dirname(project.path);
-
-  // Clear diagnostics before building
   clearDiagnostics();
 
-  vscode.window.showInformationMessage(`Building ${project.name}...`);
+  const result = await runDotnetVisual(
+    `dotnet build "${project.path}"`,
+    projectDir,
+    `Build ${project.name}`,
+  );
 
-  return new Promise<string | null>((resolve, reject) => {
-    // Show terminal for output visibility
-    const terminal = vscode.window.createTerminal({
-      name: `Build ${project.name}`,
-      cwd: projectDir,
-    });
-    terminal.show();
-    terminal.sendText(`dotnet build "${project.path}"`);
+  if (result.output) {
+    const diagnosticMap = parseBuildOutput(result.output, projectDir);
+    updateDiagnostics(diagnosticMap);
+  }
 
-    // Also capture output for diagnostics and DLL path
-    const process = child_process.exec(
-      `dotnet build "${project.path}"`,
-      { cwd: projectDir, maxBuffer: 1024 * 1024 * 10 },
-      (error, stdout, stderr) => {
-        const output = stdout + stderr;
+  if (!result.success) {
+    vscode.window.showErrorMessage(`Build failed: ${project.name}`);
+    throw new Error('Build failed');
+  }
 
-        // Parse diagnostics from output
-        if (output) {
-          const diagnosticMap = parseBuildOutput(output, projectDir);
-          updateDiagnostics(diagnosticMap);
-        }
+  // Extract DLL path from build output
+  let dllPath: string | null = null;
+  const dllBaseName = project.assemblyName || project.name;
+  const dllRegex = new RegExp(
+    `->\\s*([^\\r\\n]*${dllBaseName.replace(/[.*+?^${}()|[\]\\\\]/g, '\\$&')}\\.dll)`,
+    'i',
+  );
+  const dllMatch = result.output.match(dllRegex);
 
-        if (error && error.code !== 0) {
-          vscode.window.showErrorMessage(`Build failed: ${project.name}`);
-          reject(new Error('Build failed'));
-        } else {
-          // Extract DLL path from build output - find the one matching this project
-          let dllPath: string | null = null;
-          // Use AssemblyName if specified in .csproj, otherwise use project name
-          const dllBaseName = project.assemblyName || project.name;
+  if (dllMatch) {
+    let extractedPath = dllMatch[1].trim();
+    if (!path.isAbsolute(extractedPath)) {
+      extractedPath = path.join(projectDir, extractedPath);
+    }
+    dllPath = path.normalize(extractedPath);
+  }
 
-          // Look for line containing "-> path/to/AssemblyName.dll"
-          const dllRegex = new RegExp(
-            `->\\s*([^\\r\\n]*${dllBaseName.replace(/[.*+?^${}()|[\]\\\\]/g, '\\$&')}\\.dll)`,
-            'i',
-          );
-          const dllMatch = output.match(dllRegex);
-
-          if (dllMatch) {
-            let extractedPath = dllMatch[1].trim();
-            // If path is relative, make it absolute relative to project directory
-            if (!path.isAbsolute(extractedPath)) {
-              extractedPath = path.join(projectDir, extractedPath);
-            }
-            // Normalize the path
-            dllPath = path.normalize(extractedPath);
-          }
-
-          vscode.window.showInformationMessage(`✓ Build succeeded: ${project.name}`);
-          resolve(dllPath);
-        }
-      },
-    );
-  });
+  vscode.window.showInformationMessage(`✓ Build succeeded: ${project.name}`);
+  return dllPath;
 }
 
 /**
  * Build a solution using dotnet build
  */
-export async function buildSolution(
-  solution: SolutionInfo,
-  autoClose: boolean = false,
-): Promise<void> {
+export async function buildSolution(solution: SolutionInfo): Promise<void> {
   const solutionDir = path.dirname(solution.path);
-
-  // Clear diagnostics before building
   clearDiagnostics();
 
-  vscode.window.showInformationMessage(`Building solution ${solution.name}...`);
+  const result = await runDotnetVisual(
+    `dotnet build "${solution.path}"`,
+    solutionDir,
+    `Build ${solution.name}`,
+  );
 
-  return new Promise<void>((resolve, reject) => {
-    // Show terminal for output visibility
-    const terminal = vscode.window.createTerminal({
-      name: `Build ${solution.name}`,
-      cwd: solutionDir,
-    });
-    terminal.show();
-    terminal.sendText(`dotnet build "${solution.path}"`);
+  if (result.output) {
+    const diagnosticMap = parseBuildOutput(result.output, solutionDir);
+    updateDiagnostics(diagnosticMap);
+  }
 
-    // Also capture output for diagnostics
-    const process = child_process.exec(
-      `dotnet build "${solution.path}"`,
-      { cwd: solutionDir, maxBuffer: 1024 * 1024 * 10 },
-      (error, stdout, stderr) => {
-        const output = stdout + stderr;
+  if (!result.success) {
+    vscode.window.showErrorMessage(`Build failed: ${solution.name}`);
+    throw new Error('Build failed');
+  }
 
-        // Parse diagnostics from output
-        if (output) {
-          const diagnosticMap = parseBuildOutput(output, solutionDir);
-          updateDiagnostics(diagnosticMap);
-        }
-
-        if (error && error.code !== 0) {
-          vscode.window.showErrorMessage(`Build failed: ${solution.name}`);
-          reject(new Error('Build failed'));
-        } else {
-          vscode.window.showInformationMessage(`✓ Build succeeded: ${solution.name}`);
-          resolve();
-        }
-      },
-    );
-  });
+  vscode.window.showInformationMessage(`✓ Build succeeded: ${solution.name}`);
 }
 
 /**
  * Clean a solution using dotnet clean
  */
-export async function cleanSolution(
-  solution: SolutionInfo,
-  autoClose: boolean = false,
-): Promise<void> {
+export async function cleanSolution(solution: SolutionInfo): Promise<void> {
   const solutionDir = path.dirname(solution.path);
-
-  // Clear diagnostics when cleaning
   clearDiagnostics();
 
-  vscode.window.showInformationMessage(`Cleaning solution ${solution.name}...`);
+  const result = await runDotnetVisual(
+    `dotnet clean "${solution.path}"`,
+    solutionDir,
+    `Clean ${solution.name}`,
+  );
 
-  return new Promise<void>((resolve, reject) => {
-    // Show terminal for output visibility
-    const terminal = vscode.window.createTerminal({
-      name: `Clean ${solution.name}`,
-      cwd: solutionDir,
-    });
-    terminal.show();
-    terminal.sendText(`dotnet clean "${solution.path}"`);
+  if (!result.success) {
+    if (result.output) {
+      const diagnosticMap = parseBuildOutput(result.output, solutionDir);
+      updateDiagnostics(diagnosticMap);
+    }
+    vscode.window.showErrorMessage(`Clean failed: ${solution.name}`);
+    throw new Error('Clean failed');
+  }
 
-    // Also capture output for diagnostics
-    const process = child_process.exec(
-      `dotnet clean "${solution.path}"`,
-      { cwd: solutionDir, maxBuffer: 1024 * 1024 * 10 },
-      (error, stdout, stderr) => {
-        const output = stdout + stderr;
-
-        if (error && error.code !== 0) {
-          // Only parse diagnostics on failure
-          if (output) {
-            const diagnosticMap = parseBuildOutput(output, solutionDir);
-            updateDiagnostics(diagnosticMap);
-          }
-          vscode.window.showErrorMessage(`Clean failed: ${solution.name}`);
-          reject(new Error('Clean failed'));
-        } else {
-          // Explicitly clear diagnostics again on successful clean
-          clearDiagnostics();
-          vscode.window.showInformationMessage(`✓ Clean succeeded: ${solution.name}`);
-          resolve();
-        }
-      },
-    );
-  });
+  clearDiagnostics();
+  vscode.window.showInformationMessage(`✓ Clean succeeded: ${solution.name}`);
 }
 
 /**
  * Test a project using dotnet test
  */
-export async function testProject(project: ProjectInfo, autoClose: boolean = false): Promise<void> {
+export async function testProject(project: ProjectInfo): Promise<void> {
   const projectDir = path.dirname(project.path);
-
-  // Clear diagnostics before testing
   clearDiagnostics();
 
-  vscode.window.showInformationMessage(`Testing ${project.name}...`);
+  const result = await runDotnetVisual(
+    `dotnet test "${project.path}"`,
+    projectDir,
+    `Test ${project.name}`,
+  );
 
-  return new Promise<void>((resolve, reject) => {
-    // Show terminal for output visibility
-    const terminal = vscode.window.createTerminal({
-      name: `Test ${project.name}`,
-      cwd: projectDir,
-    });
-    terminal.show();
-    terminal.sendText(`dotnet test "${project.path}"`);
+  if (result.output) {
+    const buildDiags = parseBuildOutput(result.output, projectDir);
+    const testDiags = parseTestOutput(result.output, projectDir);
+    // Merge diagnostics: combine arrays for the same file path
+    const merged = new Map(buildDiags);
+    for (const [file, diags] of testDiags) {
+      const existing = merged.get(file);
+      merged.set(file, existing ? [...existing, ...diags] : diags);
+    }
+    updateDiagnostics(merged);
+  }
 
-    // Also capture output for diagnostics
-    const process = child_process.exec(
-      `dotnet test "${project.path}"`,
-      { cwd: projectDir, maxBuffer: 1024 * 1024 * 10 },
-      (error, stdout, stderr) => {
-        const output = stdout + stderr;
+  if (!result.success) {
+    vscode.window.showErrorMessage(`Tests failed: ${project.name}`);
+    throw new Error('Tests failed');
+  }
 
-        // Parse both build errors and test failures
-        if (output) {
-          const buildDiagnostics = parseBuildOutput(output, projectDir);
-          const testDiagnostics = parseTestOutput(output, projectDir);
-
-          // Merge diagnostics
-          const allDiagnostics = new Map([...buildDiagnostics, ...testDiagnostics]);
-          updateDiagnostics(allDiagnostics);
-        }
-
-        if (error && error.code !== 0) {
-          vscode.window.showErrorMessage(`Tests failed: ${project.name}`);
-          reject(new Error('Tests failed'));
-        } else {
-          vscode.window.showInformationMessage(`✓ Tests passed: ${project.name}`);
-          resolve();
-        }
-      },
-    );
-  });
+  vscode.window.showInformationMessage(`✓ Tests passed: ${project.name}`);
 }
 
 /**
  * Test a solution using dotnet test
  */
-export async function testSolution(
-  solution: SolutionInfo,
-  autoClose: boolean = false,
-): Promise<void> {
+export async function testSolution(solution: SolutionInfo): Promise<void> {
   const solutionDir = path.dirname(solution.path);
-
-  // Clear diagnostics before testing
   clearDiagnostics();
 
-  vscode.window.showInformationMessage(`Testing solution ${solution.name}...`);
+  const result = await runDotnetVisual(
+    `dotnet test "${solution.path}"`,
+    solutionDir,
+    `Test ${solution.name}`,
+  );
 
-  return new Promise<void>((resolve, reject) => {
-    // Show terminal for output visibility
-    const terminal = vscode.window.createTerminal({
-      name: `Test ${solution.name}`,
-      cwd: solutionDir,
-    });
-    terminal.show();
-    terminal.sendText(`dotnet test "${solution.path}"`);
+  if (result.output) {
+    const buildDiags = parseBuildOutput(result.output, solutionDir);
+    const testDiags = parseTestOutput(result.output, solutionDir);
+    // Merge diagnostics: combine arrays for the same file path
+    const merged = new Map(buildDiags);
+    for (const [file, diags] of testDiags) {
+      const existing = merged.get(file);
+      merged.set(file, existing ? [...existing, ...diags] : diags);
+    }
+    updateDiagnostics(merged);
+  }
 
-    // Also capture output for diagnostics
-    const process = child_process.exec(
-      `dotnet test "${solution.path}"`,
-      { cwd: solutionDir, maxBuffer: 1024 * 1024 * 10 },
-      (error, stdout, stderr) => {
-        const output = stdout + stderr;
+  if (!result.success) {
+    vscode.window.showErrorMessage(`Tests failed: ${solution.name}`);
+    throw new Error('Tests failed');
+  }
 
-        // Parse both build errors and test failures
-        if (output) {
-          const buildDiagnostics = parseBuildOutput(output, solutionDir);
-          const testDiagnostics = parseTestOutput(output, solutionDir);
-
-          // Merge diagnostics
-          const allDiagnostics = new Map([...buildDiagnostics, ...testDiagnostics]);
-          updateDiagnostics(allDiagnostics);
-        }
-
-        if (error && error.code !== 0) {
-          vscode.window.showErrorMessage(`Tests failed: ${solution.name}`);
-          reject(new Error('Tests failed'));
-        } else {
-          vscode.window.showInformationMessage(`✓ Tests passed: ${solution.name}`);
-          resolve();
-        }
-      },
-    );
-  });
+  vscode.window.showInformationMessage(`✓ Tests passed: ${solution.name}`);
 }
 
 /**
@@ -675,17 +600,6 @@ function generateDebugConfig(
       pattern: '\\bNow listening on:\\s+(https?://\\S+)',
       uriFormat: '%s',
     };
-
-    if (profile?.launchBrowser !== false) {
-      config.launchBrowser = {
-        enabled: true,
-        args: '${auto-detect-url}',
-        windows: {
-          command: 'cmd.exe',
-          args: '/C start ${auto-detect-url}',
-        },
-      };
-    }
   }
 
   return config;
@@ -769,8 +683,8 @@ export async function quickLaunch(): Promise<void> {
     }
   }
 
-  // Build the project first (auto-close terminal for seamless launch)
-  const dllPath = await buildProject(project, true);
+  // Build the project first
+  const dllPath = await buildProject(project);
 
   // Small delay to ensure DLL is fully written (especially important for ASP.NET Core apps)
   await new Promise(resolve => setTimeout(resolve, 500));
@@ -855,10 +769,14 @@ export async function quickBuild(): Promise<void> {
   lastUsedItemPath = selected.item.path;
 
   // Build based on type
-  if (isSolution(selected.item)) {
-    await buildSolution(selected.item);
-  } else {
-    await buildProject(selected.item);
+  try {
+    if (isSolution(selected.item)) {
+      await buildSolution(selected.item);
+    } else {
+      await buildProject(selected.item);
+    }
+  } catch {
+    // Error messages already shown by build functions
   }
 }
 
@@ -922,10 +840,14 @@ export async function quickClean(): Promise<void> {
   lastUsedItemPath = selected.item.path;
 
   // Clean based on type
-  if (isSolution(selected.item)) {
-    await cleanSolution(selected.item);
-  } else {
-    await cleanProject(selected.item);
+  try {
+    if (isSolution(selected.item)) {
+      await cleanSolution(selected.item);
+    } else {
+      await cleanProject(selected.item);
+    }
+  } catch {
+    // Error messages already shown by clean functions
   }
 }
 
@@ -992,11 +914,11 @@ export async function quickRebuild(): Promise<void> {
   // Perform clean and build sequentially with diagnostic support
   try {
     if (isSolution(item)) {
-      await cleanSolution(item, true);
-      await buildSolution(item, false);
+      await cleanSolution(item);
+      await buildSolution(item);
     } else {
-      await cleanProject(item, true);
-      await buildProject(item, false);
+      await cleanProject(item);
+      await buildProject(item);
     }
   } catch (error) {
     // Error messages already shown by individual functions
@@ -1063,10 +985,14 @@ export async function quickTest(): Promise<void> {
   lastUsedItemPath = selected.item.path;
 
   // Test based on type
-  if (isSolution(selected.item)) {
-    await testSolution(selected.item);
-  } else {
-    await testProject(selected.item);
+  try {
+    if (isSolution(selected.item)) {
+      await testSolution(selected.item);
+    } else {
+      await testProject(selected.item);
+    }
+  } catch {
+    // Error messages already shown by test functions
   }
 }
 

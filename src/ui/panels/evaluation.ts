@@ -32,13 +32,6 @@ let extensionContext: vscode.ExtensionContext | undefined;
 export { currentPanel };
 
 /**
- * Get the temp file path for external access
- */
-export function getTempFilePath(): string | undefined {
-  return tempFilePath;
-}
-
-/**
  * Initialize the evaluation panel with extension context
  */
 export function initializeEvaluationPanel(context: vscode.ExtensionContext): void {
@@ -189,27 +182,6 @@ export async function updateEvalScaffold(
     console.error('[DebugSharp] Error updating scaffold:', error);
     return undefined;
   }
-}
-
-/**
- * Get the user's expression from the eval file, stripping the scaffold
- */
-export function getEvalExpression(): string | undefined {
-  if (!tempFilePath) return undefined;
-
-  const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === tempFilePath);
-  const content = doc
-    ? doc.getText()
-    : fs.existsSync(tempFilePath)
-      ? fs.readFileSync(tempFilePath, 'utf8')
-      : undefined;
-
-  if (!content) return undefined;
-
-  if (isScaffoldFile(content)) {
-    return extractUserExpression(content);
-  }
-  return content.trim();
 }
 
 /**

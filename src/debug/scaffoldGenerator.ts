@@ -14,7 +14,7 @@ export const EXPR_START = '// --- expression start ---';
 export const EXPR_END = '// --- expression end ---';
 
 // Header comment to identify scaffold files
-export const SCAFFOLD_HEADER = '// DebugSharp: auto-generated evaluation context';
+const SCAFFOLD_HEADER = '// DebugSharp: auto-generated evaluation context';
 
 export interface ScopeVariable {
   name: string;
@@ -185,56 +185,6 @@ export async function getSourceFileUsings(
   } catch {
     return [];
   }
-}
-
-/**
- * Search for global usings files in the project (GlobalUsings.cs, *.GlobalUsings.g.cs)
- */
-export async function getProjectGlobalUsings(projectDir: string): Promise<string[]> {
-  const usings: string[] = [];
-
-  try {
-    // Look for GlobalUsings.cs in project root
-    const globalUsingsPath = path.join(projectDir, 'GlobalUsings.cs');
-    if (fs.existsSync(globalUsingsPath)) {
-      const content = fs.readFileSync(globalUsingsPath, 'utf8');
-      const regex = /^\s*global\s+using\s+[^;]+;/gm;
-      let match;
-      while ((match = regex.exec(content)) !== null) {
-        usings.push(match[0].trim());
-      }
-    }
-
-    // Look for auto-generated global usings in obj/
-    const objDir = path.join(projectDir, 'obj');
-    if (fs.existsSync(objDir)) {
-      const findGlobalUsings = (dir: string): void => {
-        try {
-          const entries = fs.readdirSync(dir, { withFileTypes: true });
-          for (const entry of entries) {
-            const fullPath = path.join(dir, entry.name);
-            if (entry.isDirectory()) {
-              findGlobalUsings(fullPath);
-            } else if (entry.name.endsWith('.GlobalUsings.g.cs')) {
-              const content = fs.readFileSync(fullPath, 'utf8');
-              const regex = /^\s*global\s+using\s+[^;]+;/gm;
-              let match;
-              while ((match = regex.exec(content)) !== null) {
-                usings.push(match[0].trim());
-              }
-            }
-          }
-        } catch {
-          // Directory might not be accessible
-        }
-      };
-      findGlobalUsings(objDir);
-    }
-  } catch {
-    // Fail silently
-  }
-
-  return usings;
 }
 
 /**

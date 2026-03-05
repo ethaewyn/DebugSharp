@@ -17,18 +17,7 @@ export function initializeDiagnostics(context: vscode.ExtensionContext): void {
   context.subscriptions.push(buildDiagnostics);
 }
 
-/**
- * Get the diagnostic collection
- */
-export function getDiagnosticCollection(): vscode.DiagnosticCollection {
-  if (!buildDiagnostics) {
-    throw new Error('Diagnostics not initialized');
-  }
-  return buildDiagnostics;
-}
-
-/**
- * Clear all build diagnostics
+/**\n * Clear all build diagnostics
  */
 export function clearDiagnostics(): void {
   if (buildDiagnostics) {

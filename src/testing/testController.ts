@@ -472,7 +472,8 @@ async function runTests(
 
 /**
  * Parse a TRX (Visual Studio Test Results) XML file.
- * Uses regex since the format is machine-generated and predictable.
+ * Uses attribute-order-independent regex extraction since TRX attribute
+ * order varies across .NET SDK versions.
  */
 function parseTrxFile(trxPath: string): Map<string, TrxResult> {
   const results = new Map<string, TrxResult>();
@@ -483,14 +484,15 @@ function parseTrxFile(trxPath: string): Map<string, TrxResult> {
 
     // Build a map of testId → FQN from TestDefinitions
     const testIdToFqn = new Map<string, string>();
-    const defRegex = /<UnitTest[^>]*\bname="([^"]*)"[^>]*\bid="([^"]*)"[\s\S]*?<\/UnitTest>/gi;
+    const defRegex = /<UnitTest\b[^>]*>[\s\S]*?<\/UnitTest>/gi;
     let defMatch;
     while ((defMatch = defRegex.exec(content)) !== null) {
-      const name = defMatch[1];
-      const id = defMatch[2];
+      const block = defMatch[0];
+      const name = extractAttr(block, 'name');
+      const id = extractAttr(block, 'id');
+      if (!name || !id) continue;
 
       // Try to extract className from TestMethod element
-      const block = defMatch[0];
       const classMatch = block.match(/<TestMethod[^>]*\bclassName="([^"]*)"/);
       const methodMatch = block.match(/<TestMethod[^>]*\bname="([^"]*)"/);
 
@@ -506,52 +508,35 @@ function parseTrxFile(trxPath: string): Map<string, TrxResult> {
       testIdToFqn.set(id, fqn);
     }
 
-    // Parse UnitTestResult elements
-    const resultRegex =
-      /<UnitTestResult[^>]*\btestId="([^"]*)"[^>]*\btestName="([^"]*)"[^>]*\boutcome="([^"]*)"[^>]*\bduration="([^"]*)"[^>]*>([\s\S]*?)<\/UnitTestResult>/gi;
+    // Parse UnitTestResult elements (both self-closing and with body)
+    const resultRegex = /<UnitTestResult\b[^>]*(?:\/>|>[\s\S]*?<\/UnitTestResult>)/gi;
     let resMatch;
     while ((resMatch = resultRegex.exec(content)) !== null) {
-      const testId = resMatch[1];
-      const testName = resMatch[2];
-      const outcome = resMatch[3];
-      const duration = resMatch[4];
-      const body = resMatch[5];
+      const element = resMatch[0];
+      const testId = extractAttr(element, 'testId');
+      const testName = extractAttr(element, 'testName');
+      const outcome = extractAttr(element, 'outcome');
+      const duration = extractAttr(element, 'duration');
 
-      const durationMs = parseDuration(duration);
-      const fqn = testIdToFqn.get(testId) ?? testName;
+      if (!testName || !outcome) continue;
 
-      const errorMessageMatch = body.match(/<Message>([\s\S]*?)<\/Message>/);
-      const stackTraceMatch = body.match(/<StackTrace>([\s\S]*?)<\/StackTrace>/);
-      const stdoutMatch = body.match(/<StdOut>([\s\S]*?)<\/StdOut>/);
+      const durationMs = parseDuration(duration ?? '0:0:0');
+      const fqn = (testId && testIdToFqn.get(testId)) ?? testName;
 
-      results.set(fqn, {
-        testName,
-        outcome,
-        durationMs,
-        errorMessage: decodeXml(errorMessageMatch?.[1]?.trim()),
-        stackTrace: decodeXml(stackTraceMatch?.[1]?.trim()),
-        stdout: decodeXml(stdoutMatch?.[1]?.trim()),
-      });
-    }
+      // Extract error/output from the element body (if present)
+      const errorMessageMatch = element.match(/<Message>([\s\S]*?)<\/Message>/);
+      const stackTraceMatch = element.match(/<StackTrace>([\s\S]*?)<\/StackTrace>/);
+      const stdoutMatch = element.match(/<StdOut>([\s\S]*?)<\/StdOut>/);
 
-    // Also try self-closing UnitTestResult (passed tests often have no body)
-    const selfClosingRegex =
-      /<UnitTestResult[^>]*\btestId="([^"]*)"[^>]*\btestName="([^"]*)"[^>]*\boutcome="([^"]*)"[^>]*\bduration="([^"]*)"[^/]*\/>/gi;
-    let scMatch;
-    while ((scMatch = selfClosingRegex.exec(content)) !== null) {
-      const testId = scMatch[1];
-      const testName = scMatch[2];
-      const outcome = scMatch[3];
-      const duration = scMatch[4];
-
-      const fqn = testIdToFqn.get(testId) ?? testName;
-
-      // Don't overwrite if already found in the full-body parse
+      // First occurrence wins (don't overwrite)
       if (!results.has(fqn)) {
         results.set(fqn, {
           testName,
           outcome,
-          durationMs: parseDuration(duration),
+          durationMs,
+          errorMessage: decodeXml(errorMessageMatch?.[1]?.trim()),
+          stackTrace: decodeXml(stackTraceMatch?.[1]?.trim()),
+          stdout: decodeXml(stdoutMatch?.[1]?.trim()),
         });
       }
     }
@@ -560,6 +545,14 @@ function parseTrxFile(trxPath: string): Map<string, TrxResult> {
   }
 
   return results;
+}
+
+/**
+ * Extract an attribute value from an XML element string (order-independent).
+ */
+function extractAttr(element: string, attrName: string): string | undefined {
+  const match = element.match(new RegExp(`\\b${attrName}="([^"]*)"`, 'i'));
+  return match?.[1];
 }
 
 /**
@@ -623,6 +616,7 @@ async function runTestsWithDebugger(
     const proc = cp.spawn('dotnet', args, { cwd, shell: true, env });
 
     let output = '';
+    let attached = false;
     const pidRegex = /Process Id:\s*(\d+)/;
 
     const cleanup = () => {
@@ -634,12 +628,13 @@ async function runTestsWithDebugger(
       resolve();
     };
 
-    token.onCancellationRequested(cleanup);
+    const cancelListener = token.onCancellationRequested(cleanup);
 
     proc.stdout.on('data', async (data: Buffer) => {
       output += data.toString();
       const match = output.match(pidRegex);
-      if (match) {
+      if (match && !attached) {
+        attached = true;
         const pid = parseInt(match[1], 10);
         // Attach the debugger to the test host process
         try {
@@ -658,8 +653,14 @@ async function runTestsWithDebugger(
     proc.stderr.on('data', () => {
       /* consume */
     });
-    proc.on('close', () => resolve());
-    proc.on('error', () => resolve());
+    proc.on('close', () => {
+      cancelListener.dispose();
+      resolve();
+    });
+    proc.on('error', () => {
+      cancelListener.dispose();
+      resolve();
+    });
   });
 }
 
@@ -690,7 +691,7 @@ function runDotnetCancellable(
     let stdout = '';
     let stderr = '';
 
-    token.onCancellationRequested(() => {
+    const cancelListener = token.onCancellationRequested(() => {
       try {
         proc.kill();
       } catch {
@@ -701,7 +702,13 @@ function runDotnetCancellable(
 
     proc.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
     proc.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
-    proc.on('close', code => resolve({ success: code === 0, output: stdout + stderr }));
-    proc.on('error', err => resolve({ success: false, output: err.message }));
+    proc.on('close', code => {
+      cancelListener.dispose();
+      resolve({ success: code === 0, output: stdout + stderr });
+    });
+    proc.on('error', err => {
+      cancelListener.dispose();
+      resolve({ success: false, output: err.message });
+    });
   });
 }

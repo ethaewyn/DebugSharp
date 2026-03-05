@@ -1,21 +1,27 @@
 {
   "name": "debugsharp",
   "displayName": "DebugSharp",
-  "description": "Enhanced C# debugging with inline evaluation, JSON object viewing, project management, and automatic error reporting to Problems panel",
-  "version": "1.5.0",
+  "description": "Enhanced C# debugging with IntelliSense expression evaluation, Test Explorer, NuGet & project reference management, and build/test commands with Problems panel integration",
+  "version": "1.6.0",
   "publisher": "Ethaewyn",
   "icon": "icon.png",
   "categories": [
     "Debuggers",
-    "Programming Languages"
+    "Programming Languages",
+    "Testing"
   ],
   "keywords": [
     "csharp",
     "c#",
+    "dotnet",
+    ".net",
     "debug",
     "debugger",
     "evaluation",
-    "json"
+    "intellisense",
+    "nuget",
+    "test",
+    "build"
   ],
   "repository": {
     "type": "git",
@@ -32,142 +38,127 @@
   "contributes": {
     "commands": [
       {
-        "command": "csharpDebugHints.evaluateExpression",
+        "command": "debugSharp.evaluateExpression",
         "title": "Evaluate Expression",
-        "category": "C# Debug Hints"
+        "category": "DebugSharp"
       },
       {
-        "command": "csharpDebugHints.evaluateInEditor",
+        "command": "debugSharp.evaluateInEditor",
         "title": "Evaluate Expression from Editor",
-        "category": "C# Debug Hints"
+        "category": "DebugSharp"
       },
       {
-        "command": "csharpDebugHints.showObjectJson",
-        "title": "Show Object as JSON",
-        "category": "C# Debug Hints"
-      },
-      {
-        "command": "csharpDebugHints.viewObjectJson",
-        "title": "View Object as JSON",
-        "category": "C# Debug Hints"
-      },
-      {
-        "command": "csharpDebugHints.quickLaunch",
+        "command": "debugSharp.quickLaunch",
         "title": "Quick Launch Project",
-        "category": "C# Debug Hints",
+        "category": "DebugSharp",
         "icon": "$(debug-start)"
       },
       {
-        "command": "csharpDebugHints.quickBuild",
+        "command": "debugSharp.quickBuild",
         "title": "Quick Build Project",
-        "category": "C# Debug Hints",
+        "category": "DebugSharp",
         "icon": "$(tools)"
       },
       {
-        "command": "csharpDebugHints.quickClean",
+        "command": "debugSharp.quickClean",
         "title": "Quick Clean Project",
-        "category": "C# Debug Hints",
+        "category": "DebugSharp",
         "icon": "$(trash)"
       },
       {
-        "command": "csharpDebugHints.quickRebuild",
+        "command": "debugSharp.quickRebuild",
         "title": "Quick Rebuild Project",
-        "category": "C# Debug Hints",
+        "category": "DebugSharp",
         "icon": "$(sync)"
       },
       {
-        "command": "csharpDebugHints.quickTest",
+        "command": "debugSharp.quickTest",
         "title": "Quick Test Project",
-        "category": "C# Debug Hints",
+        "category": "DebugSharp",
         "icon": "$(beaker)"
       },
       {
-        "command": "csharpDebugHints.generateLaunchConfig",
+        "command": "debugSharp.generateLaunchConfigurations",
         "title": "Generate Debug Configurations",
-        "category": "C# Debug Hints"
+        "category": "DebugSharp"
       },
       {
-        "command": "csharpDebugHints.manageNugetPackages",
+        "command": "debugSharp.manageNugetPackages",
         "title": "Manage NuGet Packages",
-        "category": "C# Debug Hints"
+        "category": "DebugSharp"
       },
       {
-        "command": "csharpDebugHints.addProjectReference",
+        "command": "debugSharp.addProjectReference",
         "title": "Add Project Reference",
-        "category": "C# Debug Hints"
+        "category": "DebugSharp"
       },
       {
-        "command": "csharpDebugHints.removeProjectReference",
+        "command": "debugSharp.removeProjectReference",
         "title": "Remove Project Reference",
-        "category": "C# Debug Hints"
+        "category": "DebugSharp"
       }
     ],
     "menus": {
       "explorer/context": [
         {
-          "command": "csharpDebugHints.manageNugetPackages",
+          "command": "debugSharp.manageNugetPackages",
           "when": "resourceExtname == .csproj",
           "group": "nuget@1"
         },
         {
-          "command": "csharpDebugHints.addProjectReference",
+          "command": "debugSharp.addProjectReference",
           "when": "resourceExtname == .csproj",
           "group": "nuget@2"
         },
         {
-          "command": "csharpDebugHints.removeProjectReference",
+          "command": "debugSharp.removeProjectReference",
           "when": "resourceExtname == .csproj",
           "group": "nuget@3"
         }
       ],
       "editor/context": [
         {
-          "command": "csharpDebugHints.evaluateExpression",
+          "command": "debugSharp.evaluateExpression",
           "when": "debugState == 'stopped'",
           "group": "debug@1"
-        },
-        {
-          "command": "csharpDebugHints.viewObjectJson",
-          "when": "debugState == 'stopped'",
-          "group": "debug@2"
         }
       ]
     },
     "keybindings": [
       {
-        "command": "csharpDebugHints.evaluateExpression",
+        "command": "debugSharp.evaluateExpression",
         "key": "ctrl+shift+e",
         "mac": "cmd+shift+e",
         "when": "editorTextFocus && editorLangId == csharp && debugState == 'stopped'"
       },
       {
-        "command": "csharpDebugHints.evaluateInEditor",
+        "command": "debugSharp.evaluateInEditor",
         "key": "ctrl+enter",
         "mac": "cmd+enter",
         "when": "resourceFilename == .vscode-debug-eval.cs"
       },
       {
-        "command": "csharpDebugHints.quickLaunch",
+        "command": "debugSharp.quickLaunch",
         "key": "ctrl+shift+f5",
         "mac": "cmd+shift+f5"
       },
       {
-        "command": "csharpDebugHints.quickBuild",
+        "command": "debugSharp.quickBuild",
         "key": "ctrl+shift+b",
         "mac": "cmd+shift+b"
       },
       {
-        "command": "csharpDebugHints.quickClean",
+        "command": "debugSharp.quickClean",
         "key": "ctrl+shift+k",
         "mac": "cmd+shift+k"
       },
       {
-        "command": "csharpDebugHints.quickRebuild",
+        "command": "debugSharp.quickRebuild",
         "key": "ctrl+shift+r",
         "mac": "cmd+shift+r"
       },
       {
-        "command": "csharpDebugHints.quickTest",
+        "command": "debugSharp.quickTest",
         "key": "ctrl+shift+t",
         "mac": "cmd+shift+t"
       }
