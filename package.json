@@ -2,7 +2,7 @@
   "name": "debugsharp",
   "displayName": "DebugSharp",
   "description": "Enhanced C# debugging with IntelliSense expression evaluation, Test Explorer, NuGet & project reference management, and build/test commands with Problems panel integration",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "publisher": "Ethaewyn",
   "icon": "icon.png",
   "categories": [
