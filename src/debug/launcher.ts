@@ -606,6 +606,19 @@ function generateDebugConfig(
     };
   }
 
+  // Suppress framework noise if enabled (similar to Rider's default behavior)
+  const suppressFrameworkLogs = vscode.workspace
+    .getConfiguration('debugSharp')
+    .get<boolean>('suppressFrameworkLogs', true);
+
+  if (suppressFrameworkLogs) {
+    config.logging = { moduleLoad: false };
+    config.env = {
+      ...config.env,
+      Logging__Debug__LogLevel__Default: 'None',
+    };
+  }
+
   return config;
 }
 
