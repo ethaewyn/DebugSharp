@@ -17,8 +17,9 @@ import {
 // Store the last used project/solution path for quick access
 let lastUsedItemPath: string | undefined;
 
-// Store the last launched project path for quick re-launch
+// Store the last launched project path and profile for quick re-launch
 let lastLaunchedProjectPath: string | undefined;
+let lastLaunchedProfileName: string | undefined;
 
 interface ProjectInfo {
   name: string;
@@ -661,7 +662,7 @@ async function launchProjectDirect(project: ProjectInfo): Promise<void> {
     return;
   }
 
-  const config = generateDebugConfig(project, undefined, finalDllPath);
+  const config = generateDebugConfig(project, lastLaunchedProfileName, finalDllPath);
   const workspaceFolder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(project.path));
   lastUsedItemPath = project.path;
   lastLaunchedProjectPath = project.path;
@@ -770,6 +771,7 @@ export async function launchProject(): Promise<void> {
   const project = selectedProject.project;
   lastUsedItemPath = project.path;
   lastLaunchedProjectPath = project.path;
+  lastLaunchedProfileName = undefined;
   let profileName: string | undefined;
 
   // Step 2: If the project has launch profiles, show profile picker
@@ -802,6 +804,7 @@ export async function launchProject(): Promise<void> {
       }
 
       profileName = selectedProfile.profileName;
+      lastLaunchedProfileName = profileName;
     }
   }
 
