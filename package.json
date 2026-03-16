@@ -137,6 +137,11 @@
           "type": "boolean",
           "default": true,
           "description": "Suppress Microsoft/ASP.NET framework logs in the debug console, showing only application logs (similar to Rider's default behavior)."
+        },
+        "debugSharp.openBrowserOnLaunch": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically open a browser when launching an ASP.NET web application."
         }
       }
     },

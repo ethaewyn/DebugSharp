@@ -599,11 +599,17 @@ function generateDebugConfig(
       config.env.ASPNETCORE_URLS = applicationUrl;
     }
 
-    config.serverReadyAction = {
-      action: 'openExternally',
-      pattern: '\\bNow listening on:\\s+(https?://\\S+)',
-      uriFormat: '%s',
-    };
+    const openBrowser = vscode.workspace
+      .getConfiguration('debugSharp')
+      .get<boolean>('openBrowserOnLaunch', true);
+
+    if (openBrowser) {
+      config.serverReadyAction = {
+        action: 'openExternally',
+        pattern: '\\bNow listening on:\\s+(https?://\\S+)',
+        uriFormat: '%s',
+      };
+    }
   }
 
   // Suppress framework noise if enabled (similar to Rider's default behavior)
