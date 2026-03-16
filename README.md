@@ -39,7 +39,7 @@ All-in-one C# development extension for Visual Studio Code — IntelliSense-powe
 **Quick Launch** - Instantly re-run or smart-detect your project:
 
 1. Press `Ctrl+Shift+Q` (Mac: `Cmd+Shift+Q`)
-2. If you have a last launched project and the active file belongs to it → launches immediately
+2. If you have a last launched project and the active file belongs to it → launches immediately with the same launch profile
 3. If a last launched project exists but the active file is different → asks if you want to re-run it or choose another
 4. If no last project but a `.cs` file is open → launches the project that contains it
 5. Otherwise, falls back to the full project picker
@@ -290,7 +290,10 @@ You can remap any of these in **File → Preferences → Keyboard Shortcuts**.
 
 ## Extension Settings
 
-This extension works out of the box with no additional configuration required.
+| Setting | Default | Description |
+| --- | --- | --- |
+| `debugSharp.suppressFrameworkLogs` | `true` | Suppress debugger module load messages and duplicate log output in the debug console, showing only application logs (similar to Rider's default behavior). |
+| `debugSharp.openBrowserOnLaunch` | `true` | Automatically open a browser when launching an ASP.NET web application. |
 
 ## Known Issues
 
