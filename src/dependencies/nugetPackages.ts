@@ -1,13 +1,13 @@
 /**
- * NuGet Manager
+ * NuGet Package References
  *
- * Handles parsing .csproj files to read installed packages and
- * modifying package references using the dotnet CLI (preserves formatting).
+ * Reads installed packages from .csproj files and mutates them via the
+ * dotnet CLI (which preserves the file's formatting).
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import * as cp from 'child_process';
-import * as vscode from 'vscode';
+import { runDotnet } from '../shared/dotnet';
+import { getProjects } from '../shared/projectIndex';
 
 export interface InstalledPackage {
   id: string;
@@ -114,9 +114,9 @@ export async function getAllPackages(csprojPath: string): Promise<InstalledPacka
  * Find all .csproj files in the workspace (excluding the given one).
  */
 async function findSiblingProjects(excludeCsprojPath: string): Promise<string[]> {
-  const uris = await vscode.workspace.findFiles('**/*.csproj', '**/node_modules/**');
+  const projects = await getProjects();
   const normalized = path.normalize(excludeCsprojPath).toLowerCase();
-  return uris.map(u => u.fsPath).filter(p => path.normalize(p).toLowerCase() !== normalized);
+  return projects.map(p => p.path).filter(p => path.normalize(p).toLowerCase() !== normalized);
 }
 
 /**
@@ -189,31 +189,6 @@ export async function batchCrossProjectCheck(
 // ─── CLI-based mutations (preserve csproj formatting) ────────────────
 
 /**
- * Run a dotnet CLI command and return { success, output }.
- */
-function runDotnet(args: string[], cwd: string): Promise<{ success: boolean; output: string }> {
-  return new Promise(resolve => {
-    const proc = cp.spawn('dotnet', args, { cwd, shell: true });
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
-    proc.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
-
-    proc.on('close', code => {
-      resolve({
-        success: code === 0,
-        output: stdout + stderr,
-      });
-    });
-
-    proc.on('error', err => {
-      resolve({ success: false, output: err.message });
-    });
-  });
-}
-
-/**
  * Add or update a package reference using `dotnet add package`.
  * Preserves existing csproj formatting.
  */
@@ -222,11 +197,9 @@ export async function addPackageReference(
   packageId: string,
   version: string,
 ): Promise<boolean> {
-  const cwd = path.dirname(csprojPath);
-  const result = await runDotnet(
-    ['add', csprojPath, 'package', packageId, '--version', version],
-    cwd,
-  );
+  const result = await runDotnet(['add', csprojPath, 'package', packageId, '--version', version], {
+    cwd: path.dirname(csprojPath),
+  });
 
   if (!result.success) {
     console.error('dotnet add package failed:', result.output);
@@ -242,8 +215,9 @@ export async function removePackageReference(
   csprojPath: string,
   packageId: string,
 ): Promise<boolean> {
-  const cwd = path.dirname(csprojPath);
-  const result = await runDotnet(['remove', csprojPath, 'package', packageId], cwd);
+  const result = await runDotnet(['remove', csprojPath, 'package', packageId], {
+    cwd: path.dirname(csprojPath),
+  });
 
   if (!result.success) {
     console.error('dotnet remove package failed:', result.output);

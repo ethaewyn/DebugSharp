@@ -1,8 +1,7 @@
 /**
- * NuGet Service
+ * NuGet API Client
  *
- * Handles interactions with the NuGet API for searching packages,
- * retrieving package details, versions, and dependencies.
+ * Talks to nuget.org for package search, versions and dependency metadata.
  */
 import * as https from 'https';
 

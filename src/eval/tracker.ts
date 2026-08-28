@@ -35,6 +35,47 @@ export function getLastStoppedState() {
 }
 
 /**
+ * Get the stopped state for a command that requires a paused debugger,
+ * warning the user and returning undefined when it isn't available.
+ */
+export function requireStoppedFrame() {
+  if (!vscode.debug.activeDebugSession) {
+    vscode.window.showWarningMessage('No active debug session');
+    return undefined;
+  }
+
+  // The focused frame wins: it is the frame the Debug Console evaluates
+  // against, so using anything else would evaluate an expression somewhere
+  // other than the scope the user is looking at.
+  const focused = getFocusedStackFrame();
+  if (focused) {
+    return focused;
+  }
+
+  if (!lastStoppedState) {
+    vscode.window.showWarningMessage('Debugger is not paused');
+    return undefined;
+  }
+
+  return lastStoppedState;
+}
+
+/**
+ * VS Code's currently focused stack frame, if the call stack is focused on one.
+ * `activeStackItem` is a thread rather than a frame while the program runs.
+ */
+export function getFocusedStackFrame():
+  | { session: vscode.DebugSession; frameId: number; threadId: number }
+  | undefined {
+  const active = vscode.debug.activeStackItem;
+  if (!active || !('frameId' in active)) {
+    return undefined;
+  }
+
+  return { session: active.session, frameId: active.frameId, threadId: active.threadId };
+}
+
+/**
  * Update the stored frame ID (called from the tracker callback after
  * the scaffold has been resolved).
  */

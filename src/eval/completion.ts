@@ -6,7 +6,7 @@
  * This provider adds runtime values as documentation and handles dynamic member access.
  */
 import * as vscode from 'vscode';
-import { EXPR_START, EXPR_END } from '../debug/scaffoldGenerator';
+import { EXPR_START, EXPR_END, EVAL_FILE_NAME } from './scaffold';
 
 let debugSession: vscode.DebugSession | undefined;
 let currentFrameId: number | undefined;
@@ -16,7 +16,7 @@ let currentFrameId: number | undefined;
  */
 export function registerVariableCompletionProvider(context: vscode.ExtensionContext): void {
   const provider = vscode.languages.registerCompletionItemProvider(
-    { pattern: '**/.vscode-debug-eval.cs' },
+    { pattern: `**/${EVAL_FILE_NAME}` },
     {
       async provideCompletionItems(document: vscode.TextDocument, position: vscode.Position) {
         if (!debugSession || currentFrameId === undefined) {

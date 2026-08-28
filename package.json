@@ -1,8 +1,8 @@
 {
   "name": "debugsharp",
   "displayName": "DebugSharp",
-  "description": "Enhanced C# debugging with IntelliSense expression evaluation, Test Explorer, NuGet & project reference management, and build/test commands with Problems panel integration",
-  "version": "1.8.0",
+  "description": "Enhanced C# debugging with IntelliSense expression evaluation, builds that skip when nothing changed, Test Explorer, NuGet & project reference management, and Problems panel integration",
+  "version": "1.9.0",
   "publisher": "Ethaewyn",
   "icon": "icon.png",
   "categories": [
@@ -21,7 +21,8 @@
     "intellisense",
     "nuget",
     "test",
-    "build"
+    "build",
+    "incremental"
   ],
   "repository": {
     "type": "git",
@@ -142,6 +143,26 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically open a browser when launching an ASP.NET web application."
+        },
+        "debugSharp.testExplorer": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "always",
+            "never"
+          ],
+          "default": "auto",
+          "enumDescriptions": [
+            "Register DebugSharp's Test Explorer only when C# Dev Kit is not installed, since Dev Kit provides its own.",
+            "Always register DebugSharp's Test Explorer, even alongside Dev Kit's.",
+            "Never register DebugSharp's Test Explorer."
+          ],
+          "description": "Whether to show DebugSharp's Test Explorer in the Testing sidebar. Takes effect after reloading the window."
+        },
+        "debugSharp.skipUnchangedBuilds": {
+          "type": "boolean",
+          "default": true,
+          "description": "Skip 'dotnet build' when the compiled output is already newer than every source file, project file and referenced project. Launch and Quick Build do nothing; Quick Test reuses the existing binaries via --no-build. Quick Rebuild always rebuilds."
         }
       }
     },
@@ -191,7 +212,7 @@
     ]
   },
   "scripts": {
-    "compile": "tsc -p . && node -e \"require('fs').cpSync('src/ui/panels/templates', 'out/ui/panels/templates', {recursive: true})\""
+    "compile": "tsc -p . && node -e \"require('fs').cpSync('src/dependencies/templates', 'out/dependencies/templates', {recursive: true})\""
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
