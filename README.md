@@ -1,6 +1,6 @@
 # DebugSharp
 
-All-in-one C# development extension for Visual Studio Code — IntelliSense-powered expression evaluation, Test Explorer integration, NuGet & project reference management, and build/test commands with Problems panel reporting.
+All-in-one C# development extension for Visual Studio Code — IntelliSense-powered expression evaluation, builds that skip when nothing has changed, Test Explorer integration, NuGet & project reference management, and Problems panel reporting.
 
 ## Features
 
@@ -15,12 +15,13 @@ All-in-one C# development extension for Visual Studio Code — IntelliSense-powe
 - **Problems Panel Integration** - All build, test errors appear with clickable file/line links
 - **NuGet Package Manager** - Visual package management (right-click `.csproj`)
 - **Project References** - Add/remove project references with transitive duplicate detection (right-click `.csproj`)
+- **Skips unchanged builds** - Won't rerun `dotnet build` when nothing has changed since the last one
 - **Smart project detection** - Remembers last used project for quick access
 
 ### Testing
 
 - **Test Explorer Integration** - Native VS Code Test Explorer with tree view (project → namespace → class → method)
-- **Run & Debug Tests** - Run tests from the Test Explorer sidebar or debug them with breakpoints
+- **Run & Debug Tests** - Run from the Test Explorer sidebar, or debug with breakpoints — both report full results
 - **Lazy Discovery** - Tests are discovered on demand via `dotnet test --list-tests`
 - **TRX Result Parsing** - Accurate pass/fail/skip status with durations and failure messages
 - **File Watching** - Automatically refreshes tests when `.cs` or `.csproj` files change
@@ -28,8 +29,8 @@ All-in-one C# development extension for Visual Studio Code — IntelliSense-powe
 ### Debugging Features
 
 - **IntelliSense Expression Evaluator** - Edit C# expressions with full IntelliSense (types + variables)
-- **Expression History** - Track all evaluated expressions in a compact history panel
-- **Lambda Support** - Works in lambda scopes (ASP.NET minimal APIs, LINQ, etc.)
+- **Lambda Support** - Sees captured variables and the enclosing instance when stopped inside a lambda (ASP.NET minimal APIs, LINQ, etc.)
+- **Follows the Call Stack** - The evaluation scope tracks the frame you select, so it always matches the Debug Console
 - **Auto Debug Configuration** - Generate launch.json for all projects
 
 ## Usage
@@ -48,8 +49,10 @@ All-in-one C# development extension for Visual Studio Code — IntelliSense-powe
 
 1. Press `Ctrl+Shift+F5` (Mac: `Cmd+Shift+F5`) or run command "Launch Project"
 2. Select your project from the list (last used appears first)
-3. For ASP.NET projects with multiple launch profiles, choose one
+3. For ASP.NET projects with multiple launch profiles, choose one — the profile is remembered **per project**, and offered first next time
 4. Project builds and debugging starts automatically
+
+Quick Launch reuses the profile last chosen for that specific project. If you've never picked one, it uses the project's default — the first profile with `"commandName": "Project"`, matching `dotnet run`.
 
 **Quick Build** - Build without running:
 
@@ -90,6 +93,31 @@ All-in-one C# development extension for Visual Studio Code — IntelliSense-powe
 - Test projects (xUnit, NUnit, MSTest)
 
 **No tasks.json required!** Everything is handled automatically.
+
+**Debug vs Release:** DebugSharp always builds and launches `Debug`, matching `dotnet build`'s own default. C# Dev Kit already shows a configuration picker in the status bar and exposes no way to read its selection, so a second selector could only ever disagree with it — silently building Debug while the visible picker said Release. When you need another configuration, use Dev Kit's build commands or `dotnet build -c Release` directly.
+
+### Skipping unchanged builds
+
+Launching normally means waiting on `dotnet build` even when you changed nothing. MSBuild does its own incremental check, but only after 1-2 seconds of startup and project evaluation — so a no-op build still costs you that time on every run.
+
+DebugSharp answers the same question first, with a filesystem check:
+
+- Finds the project's compiled assembly under `bin/Debug` — never another configuration, so a Release build sitting on disk can't make a stale Debug output look current
+- Compares its timestamp against **every** input: all files in the project tree (not just `.cs` — `.resx`, `.json`, and content files all count), the `.csproj`, the restore marker `obj/project.assets.json`, and any `Directory.Build.props`, `Directory.Build.targets`, `Directory.Packages.props`, `global.json` or `NuGet.config` above it
+- Repeats this for every referenced project, transitively
+
+If the output wins, the build is skipped:
+
+| Command                       | When up to date                                                        |
+| ----------------------------- | ---------------------------------------------------------------------- |
+| Quick Launch / Launch Project | Skips the build and starts debugging immediately                       |
+| Quick Build                   | Reports "Up to date", runs nothing                                     |
+| Quick Test                    | Passes `--no-build` — tests still run, they just don't recompile first |
+| Quick Rebuild                 | Always rebuilds (it cleans first, so nothing is ever up to date)       |
+
+The check is deliberately biased towards building: anything missing, unreadable, or ambiguous counts as stale. A needless build costs seconds, while a wrongly skipped one would run your old code. For solutions, every project the solution names must resolve and be up to date — one project outside the workspace and the whole solution rebuilds.
+
+Set `debugSharp.skipUnchangedBuilds` to `false` to always build, or use **Quick Rebuild** (`Ctrl+Shift+R`) as a one-off override.
 
 ### Problems Panel Integration
 
@@ -152,12 +180,14 @@ When you build, rebuild, clean, or test a project, DebugSharp automatically:
 2. Test projects are discovered automatically from your workspace
 3. Expand a project node to discover its tests (grouped by namespace → class → method)
 4. Click the **Run** button next to any test, class, namespace, or project to run it
-5. Click the **Debug** button to run with breakpoints
+5. Click the **Debug** button to hit breakpoints — debug runs report the same pass/fail results as normal runs
 6. Results show pass/fail/skip icons with durations
-7. Failed tests display error messages and stack traces inline
+7. Failed tests display error messages and clickable stack trace locations inline
 8. Tests automatically refresh when you edit `.cs` or `.csproj` files
 
 **Supported frameworks:** xUnit, NUnit, MSTest
+
+> **Using C# Dev Kit?** Dev Kit registers its own Test Explorer, so DebugSharp's stays out of the way — otherwise the Testing sidebar would list every test twice and run each one through two separate `dotnet test` invocations. Set `debugSharp.testExplorer` to `always` if you prefer this one. `Ctrl+Shift+T` (Quick Test) is unaffected and works either way.
 
 ### Evaluate Expressions with IntelliSense
 
@@ -167,18 +197,17 @@ When you build, rebuild, clean, or test a project, DebugSharp automatically:
 2. Press `Ctrl+Shift+E` (Mac: `Cmd+Shift+E`) or right-click → "Evaluate Expression"
 3. A C# file opens with **full IntelliSense**:
    - All project types (classes, interfaces, enums)
-   - All runtime variables from current scope
-   - Member access with method suggestions
+   - Every variable in the current scope, with its runtime type
+   - Member access and method signatures via `Ctrl+Space`
 4. Type your expression (e.g., `myObject.MyMethod()`, `items.Where(x => x.Price > 10).ToList()`)
 5. Press `Ctrl+Enter` (Mac: `Cmd+Enter`)
-6. Expression is sent to Debug Console and evaluated
-7. View results in Debug Console with history tracked in the side panel
+6. The expression is sent to the Debug Console and evaluated there
 
-**Why this is better:**
+**Notes:**
 
-- Full IntelliSense for all types and variables
-- Works perfectly in lambda scopes
-- Expression history tracking
+- The file always describes the stack frame **currently selected in the Call Stack**. Click a different frame and it re-populates for that scope
+- Inside a lambda you get the lambda's own locals, its captured variables, and the enclosing object's members
+- Variables whose runtime type can't be expressed in C# (anonymous types, for instance) are declared `dynamic`; static completion isn't available on those
 
 ### Generate Debug Configurations
 
@@ -209,63 +238,86 @@ When you build, rebuild, clean, or test a project, DebugSharp automatically:
   - C# extension (ms-dotnettools.csharp) - **FREE and open source**, OR
   - C# Dev Kit (ms-dotnettools.csdevkit)
 
-**Note:** This extension is completely **free and open-source compatible**. IntelliSense works in all project types by automatically creating a temporary evaluation file in your project folder.
+**Note:** This extension is completely **free and open-source compatible** — it needs only the C# extension, not C# Dev Kit.
+
+### Alongside C# Dev Kit
+
+DebugSharp is built to sit next to Dev Kit rather than compete with it:
+
+| Feature                                                                                      | With Dev Kit installed                                                            |
+| -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Test Explorer                                                                                | **Disabled** — Dev Kit provides its own (override with `debugSharp.testExplorer`) |
+| NuGet Package Manager                                                                        | **Enabled** — a more visual, Visual Studio-like package UI                        |
+| Expression evaluation, build & launch commands, unchanged-build skipping, project references | **Enabled** — Dev Kit doesn't cover these                                         |
 
 ## Commands
 
+All commands are under the **DebugSharp** category in the Command Palette.
+
 ### Project Management
 
-- `C# Debug Hints: Quick Launch Project` - `Ctrl+Shift+F5` - Instantly debug any project
-- `C# Debug Hints: Quick Build Project` - `Ctrl+Shift+B` - Build project or solution
-- `C# Debug Hints: Quick Clean Project` - `Ctrl+Shift+K` - Clean project or solution
-- `C# Debug Hints: Quick Rebuild Project` - `Ctrl+Shift+R` - Clean and rebuild
-- `C# Debug Hints: Quick Test Project` - `Ctrl+Shift+T` - Run tests
-- `C# Debug Hints: Generate Debug Configurations` - Auto-generate launch.json
-- `C# Debug Hints: Manage NuGet Packages` - Visual NuGet package management
-- `C# Debug Hints: Add Project Reference` - Add project-to-project references
-- `C# Debug Hints: Remove Project Reference` - Remove project references
+| Command                                     | Shortcut        | Description                                                 |
+| ------------------------------------------- | --------------- | ----------------------------------------------------------- |
+| `DebugSharp: Quick Launch`                  | `Ctrl+Shift+Q`  | Re-run the last project, or infer one from the active file  |
+| `DebugSharp: Launch Project`                | `Ctrl+Shift+F5` | Project picker with launch profile selection                |
+| `DebugSharp: Quick Build Project`           | `Ctrl+Shift+B`  | Build a project or solution                                 |
+| `DebugSharp: Quick Clean Project`           | `Ctrl+Shift+K`  | Clean a project or solution                                 |
+| `DebugSharp: Quick Rebuild Project`         | `Ctrl+Shift+R`  | Clean and rebuild (always builds)                           |
+| `DebugSharp: Quick Test Project`            | `Ctrl+Shift+T`  | Run tests                                                   |
+| `DebugSharp: Generate Debug Configurations` | —               | Auto-generate `launch.json`                                 |
+| `DebugSharp: Manage NuGet Packages`         | —               | Visual NuGet package management (right-click a `.csproj`)   |
+| `DebugSharp: Add Project Reference`         | —               | Add project-to-project references (right-click a `.csproj`) |
+| `DebugSharp: Remove Project Reference`      | —               | Remove project references (right-click a `.csproj`)         |
 
 ### Debugging
 
-- `C# Debug Hints: Evaluate Expression` - `Ctrl+Shift+E` - Open evaluation panel with IntelliSense
+| Command                                       | Shortcut       | Description                                |
+| --------------------------------------------- | -------------- | ------------------------------------------ |
+| `DebugSharp: Evaluate Expression`             | `Ctrl+Shift+E` | Open the evaluation file with IntelliSense |
+| `DebugSharp: Evaluate Expression from Editor` | `Ctrl+Enter`   | Send the expression to the Debug Console   |
 
 ## How It Works
 
 ### Scaffold-Based IntelliSense
 
-DebugSharp creates a temporary `.vscode-debug-eval.cs` file in your project folder when you open the evaluation panel. This file contains a **C# scaffold** — a generated class with typed variable declarations matching your current debug scope:
+DebugSharp writes a temporary `.vscode-debug-eval.cs` file into the project being debugged. Because it's a real file in your project, Roslyn analyses it with the project's full type information — that's what makes `Ctrl+Space` work. It holds typed declarations for everything in your current debug scope:
 
 ```csharp
-// Auto-generated — do not edit above this line
+// DebugSharp: auto-generated evaluation context
 #pragma warning disable
 #nullable disable
+using MyApp.Models;
 
-using MyApp.Models;  // from your source file
-
-class _ { void _() {
+class __DebugSharpEval { void Evaluate() {
     List<WeatherForecast> forecast = default!;
     string[] summaries = default!;
 
-    // ── YOUR EXPRESSION (edit below) ──
+    var __debugSharpResult = new object[] {
+    // --- expression start ---
     forecast.Where(f => f.TemperatureC > 20).ToList()
-    // ── END EXPRESSION ──
+    // --- expression end ---
+    };
 }}
 ```
 
 **How the scaffold is built:**
 
-1. A `DebugAdapterTracker` intercepts DAP `stopped` events to know exactly when and on which thread the debugger pauses
-2. An atomic `stackTrace` → `scopes` → `variables` call chain retrieves all local variables and their **runtime types** (not source-level `var`)
-3. The scaffold generator sanitizes type names (generics, arrays, nullable, anonymous types → `dynamic`) and writes typed declarations
-4. Source-file `using` statements are included; project-level `global using` directives are already project-wide
-5. Roslyn then provides full IntelliSense: member access, LINQ, lambdas, method signatures — everything works
+1. The frame described is the one **VS Code has focused** in the Call Stack — the same frame the Debug Console evaluates against. Select a different frame and the scaffold follows it
+2. An atomic `stackTrace` → `scopes` → `variables` chain retrieves the locals and their **runtime types** (not source-level `var`)
+3. Compiler-generated closures are expanded through, so a lambda's captured variables and enclosing `this` appear as ordinary locals
+4. Type names are sanitized into legal C#; anything unrecognisable degrades to `dynamic` rather than breaking the file
+5. Source-file `using` directives and the project's own namespaces are included
 
-**Why this approach:**
+**Two details make it work, and both are load-bearing:**
 
-- Full IntelliSense for all project types **and** runtime variables
-- Works perfectly inside lambda scopes (ASP.NET minimal APIs, LINQ callbacks, etc.)
-- Supports chained member access (`list.Where(x => ...)`)
-- No extra configuration — the file is cleaned up when debugging stops
+- The generated class and method **must not share a name**. `class _ { void _() {` is `CS0542` — it never compiles, which breaks both your build and IntelliSense.
+- The expression lives in an **array initializer**, not bare in the method body. A bare expression isn't a statement (`CS1002`), and a syntax error leaves Roslyn without a parse tree — and completion needs a tree. Inside the initializer, a half-typed expression is only a _binding_ error, so the tree survives and `Ctrl+Space` keeps working.
+
+**Consequences worth knowing:**
+
+- A void call such as `Console.WriteLine(x)` shows a red squiggle, because void doesn't convert to `object`. It still evaluates correctly — `Ctrl+Enter` sends the raw text to the Debug Console, which never sees the wrapper
+- While you are mid-expression the file won't compile, exactly as any half-typed C# wouldn't
+- The file is deleted when debugging stops, and orphans are cleaned up at startup
 
 ### Expression Evaluation
 
@@ -279,25 +331,33 @@ When you press `Ctrl+Enter`, the expression between the markers is extracted and
 
 Some shortcuts override VS Code defaults to provide a Visual Studio-like workflow:
 
-| DebugSharp Shortcut            | VS Code Default It Replaces |
-| ------------------------------ | --------------------------- |
-| `Ctrl+Shift+B` (Quick Build)   | Run Build Task              |
-| `Ctrl+Shift+T` (Quick Test)    | Reopen Closed Editor        |
-| `Ctrl+Shift+K` (Quick Clean)   | Delete Line                 |
-| `Ctrl+Shift+F5` (Quick Launch) | Debug: Restart              |
+| DebugSharp Shortcut                  | VS Code Default It Replaces |
+| ------------------------------------ | --------------------------- |
+| `Ctrl+Shift+B` (Quick Build)         | Run Build Task              |
+| `Ctrl+Shift+T` (Quick Test)          | Reopen Closed Editor        |
+| `Ctrl+Shift+K` (Quick Clean)         | Delete Line                 |
+| `Ctrl+Shift+F5` (Launch Project)     | Debug: Restart              |
+| `Ctrl+Shift+E` (Evaluate Expression) | Focus Explorer view         |
 
 You can remap any of these in **File → Preferences → Keyboard Shortcuts**.
 
 ## Extension Settings
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `debugSharp.suppressFrameworkLogs` | `true` | Suppress debugger module load messages and duplicate log output in the debug console, showing only application logs (similar to Rider's default behavior). |
-| `debugSharp.openBrowserOnLaunch` | `true` | Automatically open a browser when launching an ASP.NET web application. |
+| Setting                            | Default | Description                                                                                                                                                                        |
+| ---------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `debugSharp.suppressFrameworkLogs` | `true`  | Suppress debugger module load messages and duplicate log output in the debug console, showing only application logs (similar to Rider's default behavior).                         |
+| `debugSharp.openBrowserOnLaunch`   | `true`  | Automatically open a browser when launching an ASP.NET web application.                                                                                                            |
+| `debugSharp.testExplorer`          | `auto`  | Whether to show DebugSharp's Test Explorer. `auto` hides it when C# Dev Kit is installed, since Dev Kit provides its own; `always` and `never` override. Requires a window reload. |
+| `debugSharp.skipUnchangedBuilds`   | `true`  | Skip `dotnet build` when the compiled output is already newer than every input. See [Skipping unchanged builds](#skipping-unchanged-builds).                                       |
 
 ## Known Issues
 
-None currently. Please report issues at: [GitHub Issues](https://github.com/Ethaewyn/debugsharp/issues)
+- Evaluating a **void** call (e.g. `Console.WriteLine(x)`) shows a red squiggle in the evaluation file. The evaluation itself works — see [Scaffold-Based IntelliSense](#scaffold-based-intellisense)
+- All keyboard shortcuts are bound globally, not only in C# workspaces
+- `Ctrl+Shift+T` (Quick Test) and the Test Explorer are separate implementations and report results differently
+- C# Dev Kit is detected at activation, so installing or removing it needs a window reload
+
+Please report issues at: [GitHub Issues](https://github.com/Ethaewyn/debugsharp/issues)
 
 ## License
 
