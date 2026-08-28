@@ -1,7 +1,7 @@
 .vscode/**
 .vscode-test/**
 src/**
-!out/ui/panels/templates/**
+!out/dependencies/templates/**
 .gitignore
 tsconfig.json
 *.vsix

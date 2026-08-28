@@ -9,7 +9,9 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import * as cp from 'child_process';
+import { runDotnet, DotnetResult } from '../shared/dotnet';
+import { getProjects, invalidateProjectIndex } from '../shared/projectIndex';
+import { shouldEnable } from '../shared/devKit';
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -34,7 +36,15 @@ const testData = new WeakMap<vscode.TestItem, TestItemData>();
 
 // ─── Controller setup ────────────────────────────────────────────────
 
-export function activateTestExplorer(context: vscode.ExtensionContext): vscode.TestController {
+export function activateTestExplorer(
+  context: vscode.ExtensionContext,
+): vscode.TestController | undefined {
+  // Dev Kit ships its own test controller; two of them means the Testing
+  // sidebar lists every test twice, each running its own `dotnet test`.
+  if (!shouldEnable('testExplorer')) {
+    return undefined;
+  }
+
   const controller = vscode.tests.createTestController('debugsharp.testExplorer', 'C# Tests');
 
   // Lazy resolution — called when the tree is expanded
@@ -78,6 +88,9 @@ export function activateTestExplorer(context: vscode.ExtensionContext): vscode.T
 
   const csprojWatcher = vscode.workspace.createFileSystemWatcher('**/*.csproj');
   csprojWatcher.onDidChange(() => {
+    // Drop the shared scan explicitly — don't depend on the index's own
+    // watcher having fired before this one.
+    invalidateProjectIndex();
     controller.items.replace([]);
     controller.resolveHandler?.(undefined);
   });
@@ -92,30 +105,12 @@ export function activateTestExplorer(context: vscode.ExtensionContext): vscode.T
  * Find test projects in the workspace and add them as top-level items.
  */
 async function discoverTestProjects(controller: vscode.TestController): Promise<void> {
-  const csprojFiles = await vscode.workspace.findFiles('**/*.csproj', '**/node_modules/**');
-
-  for (const uri of csprojFiles) {
-    try {
-      const content = fs.readFileSync(uri.fsPath, 'utf8');
-      const isTest =
-        content.includes('Microsoft.NET.Test.Sdk') ||
-        content.includes('xunit') ||
-        content.includes('NUnit') ||
-        content.includes('nunit') ||
-        content.includes('MSTest') ||
-        content.includes('MSTest.TestFramework') ||
-        content.includes('MSTest.TestAdapter');
-
-      if (!isTest) continue;
-
-      const name = path.basename(uri.fsPath, '.csproj');
-      const item = controller.createTestItem(uri.fsPath, name, uri);
-      item.canResolveChildren = true;
-      testData.set(item, { type: 'project', projectPath: uri.fsPath });
-      controller.items.add(item);
-    } catch {
-      // skip unreadable files
-    }
+  for (const project of await getProjects('test')) {
+    const uri = vscode.Uri.file(project.path);
+    const item = controller.createTestItem(project.path, project.name, uri);
+    item.canResolveChildren = true;
+    testData.set(item, { type: 'project', projectPath: project.path });
+    controller.items.add(item);
   }
 }
 
@@ -129,12 +124,12 @@ async function discoverTests(
 ): Promise<void> {
   const cwd = path.dirname(projectPath);
 
-  const result = await runDotnet(['test', projectPath, '--list-tests', '--no-build'], cwd);
+  const result = await runDotnet(['test', projectPath, '--list-tests', '--no-build'], { cwd });
 
   // If --no-build fails (not built yet), retry with build
   let output = result.output;
   if (!result.success) {
-    const retry = await runDotnet(['test', projectPath, '--list-tests'], cwd);
+    const retry = await runDotnet(['test', projectPath, '--list-tests'], { cwd });
     if (!retry.success) {
       projectItem.error = `Failed to discover tests:\n${retry.output}`;
       return;
@@ -224,15 +219,7 @@ function buildTestTree(
 
   for (const [classFqn, methods] of byClass) {
     const lastDot = classFqn.lastIndexOf('.');
-    let ns: string;
-    let className: string;
-    if (lastDot === -1) {
-      ns = '';
-      className = classFqn;
-    } else {
-      ns = classFqn.substring(0, lastDot);
-      className = classFqn.substring(lastDot + 1);
-    }
+    const ns = lastDot === -1 ? '' : classFqn.substring(0, lastDot);
 
     if (!byNamespace.has(ns)) {
       byNamespace.set(ns, new Map());
@@ -381,80 +368,16 @@ async function runTests(
       args.push('--filter', uniqueFilters.join('|'));
     }
 
-    if (debug) {
-      // For debug, launch via VS Code's debugger
-      await runTestsWithDebugger(projectPath, args, cwd, token);
-      // In debug mode we can't easily get TRX — mark tests as passed/skipped
+    // Debugging changes how the test host is started, not how it reports —
+    // the trx logger writes results either way.
+    const result = debug
+      ? await runTestsWithDebugger(args, cwd, token)
+      : await runDotnet(args, { cwd, token });
+
+    if (token.isCancellationRequested) {
       tests.forEach(t => run.skipped(t));
     } else {
-      const result = await runDotnetCancellable(args, cwd, token);
-
-      if (token.isCancellationRequested) {
-        tests.forEach(t => run.skipped(t));
-      } else {
-        // Parse TRX results
-        const trxPath = path.join(tmpDir, trxFile);
-        const trxResults = parseTrxFile(trxPath);
-
-        if (trxResults.size === 0 && !result.success) {
-          // TRX not produced — build or framework error
-          const msg = new vscode.TestMessage(result.output || 'Test run failed');
-          tests.forEach(t => run.errored(t, msg));
-        } else {
-          for (const test of tests) {
-            const data = testData.get(test);
-            const fqn = data?.fullyQualifiedName ?? '';
-
-            // Try exact match first, then partial match
-            let trx = trxResults.get(fqn);
-            if (!trx) {
-              // For parameterised tests the TRX name might differ slightly
-              const baseFqn = fqn.replace(/\(.*\)$/, '');
-              for (const [key, val] of trxResults) {
-                if (key.startsWith(baseFqn)) {
-                  trx = val;
-                  break;
-                }
-              }
-            }
-
-            if (!trx) {
-              run.skipped(test);
-              continue;
-            }
-
-            switch (trx.outcome.toLowerCase()) {
-              case 'passed': {
-                run.passed(test, trx.durationMs);
-                break;
-              }
-              case 'failed': {
-                const msg = new vscode.TestMessage(trx.errorMessage ?? 'Test failed');
-                if (trx.stackTrace) {
-                  const loc = parseStackTraceLocation(trx.stackTrace);
-                  if (loc) msg.location = loc;
-                }
-                if (trx.stdout) {
-                  run.appendOutput(trx.stdout.replace(/\n/g, '\r\n'), undefined, test);
-                }
-                run.failed(test, msg, trx.durationMs);
-                break;
-              }
-              case 'notexecuted':
-              case 'inconclusive': {
-                run.skipped(test);
-                break;
-              }
-              default: {
-                const errMsg = new vscode.TestMessage(
-                  trx.errorMessage ?? `Outcome: ${trx.outcome}`,
-                );
-                run.errored(test, errMsg, trx.durationMs);
-              }
-            }
-          }
-        }
-      }
+      reportResults(run, tests, path.join(tmpDir, trxFile), result);
     }
 
     // Cleanup temp directory
@@ -466,6 +389,81 @@ async function runTests(
   }
 
   run.end();
+}
+
+/**
+ * Report a finished run's outcomes from its TRX file.
+ */
+function reportResults(
+  run: vscode.TestRun,
+  tests: vscode.TestItem[],
+  trxPath: string,
+  result: DotnetResult,
+): void {
+  const trxResults = parseTrxFile(trxPath);
+
+  if (trxResults.size === 0 && !result.success) {
+    // TRX not produced — build or framework error
+    const msg = new vscode.TestMessage(result.output || 'Test run failed');
+    tests.forEach(t => run.errored(t, msg));
+    return;
+  }
+
+  for (const test of tests) {
+    const trx = findTrxResult(trxResults, testData.get(test)?.fullyQualifiedName ?? '');
+
+    if (!trx) {
+      run.skipped(test);
+      continue;
+    }
+
+    switch (trx.outcome.toLowerCase()) {
+      case 'passed': {
+        run.passed(test, trx.durationMs);
+        break;
+      }
+      case 'failed': {
+        const msg = new vscode.TestMessage(trx.errorMessage ?? 'Test failed');
+        if (trx.stackTrace) {
+          const loc = parseStackTraceLocation(trx.stackTrace);
+          if (loc) msg.location = loc;
+        }
+        if (trx.stdout) {
+          run.appendOutput(trx.stdout.replace(/\n/g, '\r\n'), undefined, test);
+        }
+        run.failed(test, msg, trx.durationMs);
+        break;
+      }
+      case 'notexecuted':
+      case 'inconclusive': {
+        run.skipped(test);
+        break;
+      }
+      default: {
+        run.errored(
+          test,
+          new vscode.TestMessage(trx.errorMessage ?? `Outcome: ${trx.outcome}`),
+          trx.durationMs,
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Match a test to its TRX entry, falling back to a prefix match because
+ * parameterised test names are spelled differently in the TRX.
+ */
+function findTrxResult(trxResults: Map<string, TrxResult>, fqn: string): TrxResult | undefined {
+  const exact = trxResults.get(fqn);
+  if (exact) return exact;
+
+  const baseFqn = fqn.replace(/\(.*\)$/, '');
+  for (const [key, val] of trxResults) {
+    if (key.startsWith(baseFqn)) return val;
+  }
+
+  return undefined;
 }
 
 // ─── TRX Parsing ─────────────────────────────────────────────────────
@@ -606,109 +604,35 @@ function parseStackTraceLocation(stackTrace: string): vscode.Location | undefine
  * Uses VSTEST_HOST_DEBUG to pause the test host, then attaches coreclr debugger.
  */
 async function runTestsWithDebugger(
-  projectPath: string,
   args: string[],
   cwd: string,
   token: vscode.CancellationToken,
-): Promise<void> {
-  return new Promise<void>(resolve => {
-    const env = { ...process.env, VSTEST_HOST_DEBUG: '1' };
-    const proc = cp.spawn('dotnet', args, { cwd, shell: true, env });
+): Promise<DotnetResult> {
+  let output = '';
+  let attached = false;
+  const pidRegex = /Process Id:\s*(\d+)/;
 
-    let output = '';
-    let attached = false;
-    const pidRegex = /Process Id:\s*(\d+)/;
-
-    const cleanup = () => {
-      try {
-        proc.kill();
-      } catch {
-        // ignore
-      }
-      resolve();
-    };
-
-    const cancelListener = token.onCancellationRequested(cleanup);
-
-    proc.stdout.on('data', async (data: Buffer) => {
-      output += data.toString();
+  return runDotnet(args, {
+    cwd,
+    token,
+    env: { VSTEST_HOST_DEBUG: '1' },
+    onStdout: async chunk => {
+      output += chunk;
       const match = output.match(pidRegex);
-      if (match && !attached) {
-        attached = true;
-        const pid = parseInt(match[1], 10);
-        // Attach the debugger to the test host process
-        try {
-          await vscode.debug.startDebugging(undefined, {
-            type: 'coreclr',
-            request: 'attach',
-            name: 'Debug Test',
-            processId: pid.toString(),
-          });
-        } catch {
-          vscode.window.showErrorMessage('Failed to attach debugger to test host');
-        }
-      }
-    });
+      if (!match || attached) return;
 
-    proc.stderr.on('data', () => {
-      /* consume */
-    });
-    proc.on('close', () => {
-      cancelListener.dispose();
-      resolve();
-    });
-    proc.on('error', () => {
-      cancelListener.dispose();
-      resolve();
-    });
-  });
-}
-
-// ─── CLI Helper ──────────────────────────────────────────────────────
-
-function runDotnet(args: string[], cwd: string): Promise<{ success: boolean; output: string }> {
-  return new Promise(resolve => {
-    const proc = cp.spawn('dotnet', args, { cwd, shell: true });
-    let stdout = '';
-    let stderr = '';
-    proc.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
-    proc.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
-    proc.on('close', code => resolve({ success: code === 0, output: stdout + stderr }));
-    proc.on('error', err => resolve({ success: false, output: err.message }));
-  });
-}
-
-/**
- * Like runDotnet but supports cancellation.
- */
-function runDotnetCancellable(
-  args: string[],
-  cwd: string,
-  token: vscode.CancellationToken,
-): Promise<{ success: boolean; output: string }> {
-  return new Promise(resolve => {
-    const proc = cp.spawn('dotnet', args, { cwd, shell: true });
-    let stdout = '';
-    let stderr = '';
-
-    const cancelListener = token.onCancellationRequested(() => {
+      attached = true;
+      // Attach the debugger to the paused test host process
       try {
-        proc.kill();
+        await vscode.debug.startDebugging(undefined, {
+          type: 'coreclr',
+          request: 'attach',
+          name: 'Debug Test',
+          processId: match[1],
+        });
       } catch {
-        // ignore
+        vscode.window.showErrorMessage('Failed to attach debugger to test host');
       }
-      resolve({ success: false, output: 'Cancelled' });
-    });
-
-    proc.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
-    proc.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
-    proc.on('close', code => {
-      cancelListener.dispose();
-      resolve({ success: code === 0, output: stdout + stderr });
-    });
-    proc.on('error', err => {
-      cancelListener.dispose();
-      resolve({ success: false, output: err.message });
-    });
+    },
   });
 }

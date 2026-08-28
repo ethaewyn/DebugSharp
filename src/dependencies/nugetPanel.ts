@@ -11,7 +11,7 @@ import {
   getPackageVersions,
   getPackageMetadata,
   NuGetSearchResult,
-} from '../../services/nugetService';
+} from './nugetApi';
 import {
   getInstalledPackages,
   getAllPackages,
@@ -21,8 +21,7 @@ import {
   getCrossProjectReferences,
   batchCrossProjectCheck,
   InstalledPackage,
-  CrossProjectReference,
-} from '../../services/nugetManager';
+} from './nugetPackages';
 
 let currentNugetPanel: vscode.WebviewPanel | undefined;
 let nugetExtensionContext: vscode.ExtensionContext | undefined;
@@ -303,8 +302,7 @@ function generateNugetHtml(installedPackages: InstalledPackage[]): string {
   const templatePath = path.join(
     nugetExtensionContext.extensionPath,
     'out',
-    'ui',
-    'panels',
+    'dependencies',
     'templates',
     'nugetManager.html',
   );

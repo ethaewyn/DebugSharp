@@ -7,76 +7,9 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import * as cp from 'child_process';
 import * as vscode from 'vscode';
-
-// ─── Types ───────────────────────────────────────────────────────────
-
-interface ProjectRef {
-  name: string;
-  /** Include path as written in the csproj */
-  includePath: string;
-  /** Resolved absolute path on disk */
-  absolutePath: string;
-}
-
-// ─── Reading ─────────────────────────────────────────────────────────
-
-/**
- * Parse ProjectReference entries from a csproj file.
- */
-function getProjectReferences(csprojPath: string): ProjectRef[] {
-  try {
-    const content = fs.readFileSync(csprojPath, 'utf8');
-    const refs: ProjectRef[] = [];
-    const regex = /<ProjectReference\s+Include="([^"]+)"/gi;
-    let match;
-    while ((match = regex.exec(content)) !== null) {
-      const includePath = match[1];
-      const absolutePath = path.resolve(path.dirname(csprojPath), includePath);
-      refs.push({
-        name: path.basename(absolutePath, '.csproj'),
-        includePath,
-        absolutePath,
-      });
-    }
-    return refs;
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Recursively collect all project references reachable from a csproj,
- * including transitive ones. Returns a set of normalised absolute paths.
- */
-function getAllTransitiveRefs(csprojPath: string, visited = new Set<string>()): Set<string> {
-  const norm = path.normalize(csprojPath).toLowerCase();
-  if (visited.has(norm)) return visited;
-  visited.add(norm);
-
-  const refs = getProjectReferences(csprojPath);
-  for (const ref of refs) {
-    if (fs.existsSync(ref.absolutePath)) {
-      getAllTransitiveRefs(ref.absolutePath, visited);
-    }
-  }
-  return visited;
-}
-
-// ─── CLI helpers ─────────────────────────────────────────────────────
-
-function runDotnet(args: string[], cwd: string): Promise<{ success: boolean; output: string }> {
-  return new Promise(resolve => {
-    const proc = cp.spawn('dotnet', args, { cwd, shell: true });
-    let stdout = '';
-    let stderr = '';
-    proc.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
-    proc.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
-    proc.on('close', code => resolve({ success: code === 0, output: stdout + stderr }));
-    proc.on('error', err => resolve({ success: false, output: err.message }));
-  });
-}
+import { runDotnet } from '../shared/dotnet';
+import { getProjectReferences, getProjectGraph, ProjectRef } from '../shared/projectIndex';
 
 // ─── Commands ────────────────────────────────────────────────────────
 
@@ -97,7 +30,7 @@ export async function addProjectReferenceCommand(csprojUri: vscode.Uri): Promise
   // Gather direct refs and all transitive refs
   const directRefs = getProjectReferences(csprojPath);
   const directSet = new Set(directRefs.map(r => path.normalize(r.absolutePath).toLowerCase()));
-  const transitiveSet = getAllTransitiveRefs(csprojPath);
+  const transitiveGraph = getProjectGraph(csprojPath);
 
   // Build quick-pick items
   type RefItem = vscode.QuickPickItem & { projectPath: string };
@@ -112,7 +45,7 @@ export async function addProjectReferenceCommand(csprojUri: vscode.Uri): Promise
     const rel = path.relative(path.dirname(csprojPath), absPath);
 
     const isDirect = directSet.has(norm);
-    const isTransitive = !isDirect && transitiveSet.has(norm);
+    const isTransitive = !isDirect && transitiveGraph.has(absPath);
 
     let description = rel;
     if (isDirect) {
@@ -139,12 +72,12 @@ export async function addProjectReferenceCommand(csprojUri: vscode.Uri): Promise
   items.sort((a, b) => {
     const aScore = directSet.has(path.normalize(a.projectPath).toLowerCase())
       ? 2
-      : transitiveSet.has(path.normalize(a.projectPath).toLowerCase())
+      : transitiveGraph.has(a.projectPath)
         ? 1
         : 0;
     const bScore = directSet.has(path.normalize(b.projectPath).toLowerCase())
       ? 2
-      : transitiveSet.has(path.normalize(b.projectPath).toLowerCase())
+      : transitiveGraph.has(b.projectPath)
         ? 1
         : 0;
     if (aScore !== bScore) return aScore - bScore;
@@ -169,7 +102,7 @@ export async function addProjectReferenceCommand(csprojUri: vscode.Uri): Promise
   }
 
   // Warn about transitive — let user decide
-  if (transitiveSet.has(pickedNorm)) {
+  if (transitiveGraph.has(picked.projectPath)) {
     const via = findTransitiveSource(csprojPath, picked.projectPath);
     const choice = await vscode.window.showWarningMessage(
       `${picked.label} is already transitively referenced via ${via}. Add a direct reference anyway?`,
@@ -186,8 +119,9 @@ export async function addProjectReferenceCommand(csprojUri: vscode.Uri): Promise
       title: `Adding reference to ${picked.label}...`,
     },
     async () => {
-      const cwd = path.dirname(csprojPath);
-      const result = await runDotnet(['add', csprojPath, 'reference', picked.projectPath], cwd);
+      const result = await runDotnet(['add', csprojPath, 'reference', picked.projectPath], {
+        cwd: path.dirname(csprojPath),
+      });
       if (result.success) {
         vscode.window.showInformationMessage(`Added reference to ${picked.label}`);
       } else if (result.output.toLowerCase().includes('already')) {
@@ -231,7 +165,7 @@ export async function removeProjectReferenceCommand(csprojUri: vscode.Uri): Prom
   if (!picked) return;
 
   // Check if any remaining direct ref transitively depends on the one being removed
-  const dependents = findDependents(csprojPath, picked.ref, directRefs);
+  const dependents = findDependents(picked.ref, directRefs);
   if (dependents.length > 0) {
     const names = dependents.join(', ');
     const choice = await vscode.window.showWarningMessage(
@@ -248,11 +182,9 @@ export async function removeProjectReferenceCommand(csprojUri: vscode.Uri): Prom
       title: `Removing reference to ${picked.label}...`,
     },
     async () => {
-      const cwd = path.dirname(csprojPath);
-      const result = await runDotnet(
-        ['remove', csprojPath, 'reference', picked.ref.absolutePath],
-        cwd,
-      );
+      const result = await runDotnet(['remove', csprojPath, 'reference', picked.ref.absolutePath], {
+        cwd: path.dirname(csprojPath),
+      });
       if (result.success) {
         vscode.window.showInformationMessage(`Removed reference to ${picked.label}`);
       } else {
@@ -269,13 +201,11 @@ export async function removeProjectReferenceCommand(csprojUri: vscode.Uri): Prom
  * Returns the project name, or 'another project' as fallback.
  */
 function findTransitiveSource(csprojPath: string, targetPath: string): string {
-  const targetNorm = path.normalize(targetPath).toLowerCase();
   const directRefs = getProjectReferences(csprojPath);
 
   for (const ref of directRefs) {
     if (!fs.existsSync(ref.absolutePath)) continue;
-    const reachable = getAllTransitiveRefs(ref.absolutePath);
-    if (reachable.has(targetNorm)) {
+    if (getProjectGraph(ref.absolutePath).has(targetPath)) {
       return ref.name;
     }
   }
@@ -287,11 +217,7 @@ function findTransitiveSource(csprojPath: string, targetPath: string): string {
  * Check if any of the remaining direct refs (besides the one being removed)
  * transitively reference the same project.
  */
-function findDependents(
-  csprojPath: string,
-  removing: ProjectRef,
-  allDirect: ProjectRef[],
-): string[] {
+function findDependents(removing: ProjectRef, allDirect: ProjectRef[]): string[] {
   const removingNorm = path.normalize(removing.absolutePath).toLowerCase();
   const dependents: string[] = [];
 
@@ -299,8 +225,7 @@ function findDependents(
     if (path.normalize(ref.absolutePath).toLowerCase() === removingNorm) continue;
     if (!fs.existsSync(ref.absolutePath)) continue;
 
-    const transitive = getAllTransitiveRefs(ref.absolutePath);
-    if (transitive.has(removingNorm)) {
+    if (getProjectGraph(ref.absolutePath).has(removing.absolutePath)) {
       dependents.push(ref.name);
     }
   }

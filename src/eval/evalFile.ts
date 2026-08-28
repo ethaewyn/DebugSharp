@@ -1,66 +1,159 @@
 /**
- * Evaluation Panel Module
+ * Evaluation File Module
  *
- * Provides C# expression evaluation with full IntelliSense support.
- * Uses a temporary .cs file to enable rich editing experience.
+ * Manages the temporary `.vscode-debug-eval.cs` file that gives users a
+ * real C# editing surface — with full IntelliSense — for debugger expressions.
  */
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import {
   generateScaffold,
-  getScopeVariables,
   getSourceFileUsings,
+  getProjectNamespaces,
   getFrameAndVariables,
   extractUserExpression,
   isScaffoldFile,
+  EVAL_FILE_NAME,
   EXPR_START,
   EXPR_END,
-  ScopeVariable,
-} from '../../debug/scaffoldGenerator';
+} from './scaffold';
 
 // Module state
-let currentPanel: vscode.WebviewPanel | undefined;
 let currentSession: vscode.DebugSession | undefined;
 let inputDocument: vscode.TextDocument | undefined;
 let tempFilePath: string | undefined;
 let debugSessionListener: vscode.Disposable | undefined;
 let documentCloseListener: vscode.Disposable | undefined;
-let evaluationTemplate: string | undefined;
-let extensionContext: vscode.ExtensionContext | undefined;
 
-export { currentPanel };
+/** Serializes scaffold updates — see updateEvalScaffold */
+let pendingUpdate: Promise<void> = Promise.resolve();
 
 /**
- * Initialize the evaluation panel with extension context
+ * Create or delete the scaffold without disturbing its directory's timestamp.
+ *
+ * The scaffold is our artifact, not one of the user's build inputs — but adding
+ * or removing a file bumps the containing directory's mtime, and the up-to-date
+ * check reads directory mtimes to notice deleted and renamed sources. Left
+ * alone, every debug session would mark its own project stale forever.
  */
-export function initializeEvaluationPanel(context: vscode.ExtensionContext): void {
-  extensionContext = context;
+function withoutTouchingDirectory(filePath: string, mutate: () => void): void {
+  const dir = path.dirname(filePath);
+
+  let before: fs.Stats | undefined;
+  try {
+    before = fs.statSync(dir);
+  } catch {
+    // Directory is gone; nothing to preserve
+  }
+
+  mutate();
+
+  if (before) {
+    try {
+      fs.utimesSync(dir, before.atime, before.mtime);
+    } catch {
+      // Best effort — a needless rebuild is the worst case
+    }
+  }
+}
+
+/**
+ * Delete an eval scaffold, leaving its directory's timestamp untouched.
+ */
+export function deleteEvalFileAt(filePath: string): void {
+  withoutTouchingDirectory(filePath, () => {
+    try {
+      fs.unlinkSync(filePath);
+    } catch {
+      // Already gone, or in use
+    }
+  });
+}
+
+/**
+ * Remove scaffolds left behind by a previous session.
+ */
+export async function cleanupOrphanedEvalFiles(): Promise<void> {
+  try {
+    const orphans = await vscode.workspace.findFiles(`**/${EVAL_FILE_NAME}`, '**/node_modules/**');
+    for (const file of orphans) {
+      deleteEvalFileAt(file.fsPath);
+    }
+  } catch {
+    // Workspace might not be ready
+  }
+}
+
+/**
+ * Find the nearest directory containing a .csproj file by walking up from a source file.
+ */
+function findProjectDirFromSource(sourcePath: string): string | undefined {
+  let dir = path.dirname(sourcePath);
+  const root = path.parse(dir).root;
+
+  while (dir !== root) {
+    try {
+      const entries = fs.readdirSync(dir);
+      if (entries.some(e => e.endsWith('.csproj'))) {
+        return dir;
+      }
+    } catch {
+      // Skip unreadable dirs
+    }
+    dir = path.dirname(dir);
+  }
+  return undefined;
+}
+
+/**
+ * Relocate the temp file to a new project directory.
+ * Preserves the file content and updates the module state.
+ */
+function relocateTempFile(newProjectDir: string): void {
+  const newPath = path.join(newProjectDir, EVAL_FILE_NAME);
+  if (newPath === tempFilePath) return;
+
+  try {
+    // Read current content before moving
+    let content = '';
+    if (tempFilePath && fs.existsSync(tempFilePath)) {
+      content = fs.readFileSync(tempFilePath, 'utf8');
+      deleteEvalFileAt(tempFilePath);
+    }
+
+    // Write to new location
+    const scaffold = content || generateScaffold([], [], '');
+    withoutTouchingDirectory(newPath, () => fs.writeFileSync(newPath, scaffold, 'utf8'));
+    tempFilePath = newPath;
+    inputDocument = undefined; // Force re-open from new path
+  } catch {
+    // Keep existing location on failure
+  }
 }
 
 /**
  * Create the temp .cs file when debugging starts
  */
-export async function createTempFile(session: vscode.DebugSession): Promise<void> {
+export async function createEvalFile(session: vscode.DebugSession): Promise<void> {
   // Find the specific C# project being debugged
   let projectDir: string | undefined;
 
-  // Get the debug configuration to find which project is being debugged
+  // Use cwd from debug config — set to the project directory by generateDebugConfig
   const debugConfig = session.configuration;
-  if (debugConfig?.program) {
-    // Extract project directory from the program path (e.g., bin/Debug/net9.0/Project.dll)
-    const programPath = debugConfig.program.replace(/\$\{workspaceFolder\}/g, '');
-    const match = programPath.match(/^[\/\\]?([^\/\\]+)[\/\\]/);
-    if (match) {
-      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-      if (workspaceFolder) {
-        projectDir = path.join(workspaceFolder.uri.fsPath, match[1]);
-      }
+  if (debugConfig?.cwd) {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    const resolvedCwd = debugConfig.cwd.replace(
+      /\$\{workspaceFolder\}/g,
+      workspaceFolder?.uri.fsPath || '',
+    );
+    if (fs.existsSync(resolvedCwd)) {
+      projectDir = resolvedCwd;
     }
   }
 
   // Fallback: Find any .csproj file
-  if (!projectDir || !fs.existsSync(projectDir)) {
+  if (!projectDir) {
     const csprojFiles = await vscode.workspace.findFiles('**/*.csproj', '**/node_modules/**', 10);
     if (csprojFiles.length > 0) {
       projectDir = path.dirname(csprojFiles[0].fsPath);
@@ -71,36 +164,45 @@ export async function createTempFile(session: vscode.DebugSession): Promise<void
     return;
   }
 
-  const filePath = path.join(projectDir, '.vscode-debug-eval.cs');
+  const filePath = path.join(projectDir, EVAL_FILE_NAME);
 
   // Clean up any orphaned temp file from previous session
-  if (fs.existsSync(filePath)) {
-    try {
-      fs.unlinkSync(filePath);
-    } catch {
-      // Fail silently
-    }
-  }
+  deleteEvalFileAt(filePath);
 
   tempFilePath = filePath;
 
   // Write an initial scaffold with no variables (debugger hasn't stopped yet)
   const initialScaffold = generateScaffold([], [], '');
-  fs.writeFileSync(filePath, initialScaffold, 'utf8');
+  withoutTouchingDirectory(filePath, () => fs.writeFileSync(filePath, initialScaffold, 'utf8'));
 }
 
 /**
  * Update the scaffold in the eval file with current debug scope variables.
  * Preserves the user's expression between the expression markers.
  *
- * When threadId is provided, uses the atomic getFrameAndVariables() which
- * does a single stackTrace call — avoiding stale reference issues.
- * Returns the frameId that was used (useful for callers that need it).
+ * Uses the atomic getFrameAndVariables() which does a single stackTrace call —
+ * avoiding stale reference issues. Returns the frameId that was used.
  */
-export async function updateEvalScaffold(
+export function updateEvalScaffold(
   session: vscode.DebugSession,
-  frameId: number,
-  threadId?: number,
+  threadId: number,
+  preferredFrameId?: number,
+): Promise<number | undefined> {
+  // Both the stopped event and the focused-frame change can trigger an update,
+  // and each applies a WorkspaceEdit — serialize them so their edits can't
+  // interleave on the same document.
+  const run = pendingUpdate.then(() => doUpdateEvalScaffold(session, threadId, preferredFrameId));
+  pendingUpdate = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+async function doUpdateEvalScaffold(
+  session: vscode.DebugSession,
+  threadId: number,
+  preferredFrameId?: number,
 ): Promise<number | undefined> {
   if (!tempFilePath) return undefined;
 
@@ -108,31 +210,24 @@ export async function updateEvalScaffold(
   if (!fs.existsSync(tempFilePath)) return undefined;
 
   try {
-    const projectDir = path.dirname(tempFilePath);
-    let variables: ScopeVariable[];
-    let sourceUsings: string[];
-    let resolvedFrameId = frameId;
+    // Single stackTrace → scopes → variables
+    const result = await getFrameAndVariables(session, threadId, preferredFrameId);
+    if (!result) return undefined;
 
-    if (threadId !== undefined) {
-      // Use the atomic path: single stackTrace → scopes → variables
-      const result = await getFrameAndVariables(session, threadId);
-      if (!result) return undefined;
+    const { frameId, variables, sourcePath } = result;
+    const sourceUsings = getSourceFileUsings(sourcePath);
 
-      resolvedFrameId = result.frameId;
-      variables = result.variables;
-      sourceUsings = await getSourceFileUsings(session, resolvedFrameId, result.sourcePath);
-    } else {
-      // Fallback: use provided frameId directly
-      const [vars, usings] = await Promise.all([
-        getScopeVariables(session, frameId),
-        getSourceFileUsings(session, frameId),
-      ]);
-      variables = vars;
-      sourceUsings = usings;
+    // Relocate temp file to the correct project if sourcePath reveals a different project
+    if (sourcePath) {
+      const correctProjectDir = findProjectDirFromSource(sourcePath);
+      if (correctProjectDir && path.dirname(tempFilePath) !== correctProjectDir) {
+        relocateTempFile(correctProjectDir);
+      }
     }
 
-    // Only source-file usings — global usings are already project-wide
-    const allUsings = sourceUsings;
+    // Merge source-file usings with project-wide namespace usings
+    const projectDir = path.dirname(tempFilePath);
+    const allUsings = [...sourceUsings, ...getProjectNamespaces(projectDir)];
 
     // Read current content — prefer open document over disk
     const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === tempFilePath);
@@ -147,7 +242,7 @@ export async function updateEvalScaffold(
     const newContent = generateScaffold(variables, allUsings, userExpression || '');
 
     // Skip if nothing changed
-    if (newContent === currentContent) return resolvedFrameId;
+    if (newContent === currentContent) return frameId;
 
     if (doc) {
       // Document is open — use WorkspaceEdit for atomic in-memory update
@@ -156,28 +251,28 @@ export async function updateEvalScaffold(
       const currentStartIdx = currentContent.indexOf(EXPR_START);
       const newStartIdx = newContent.indexOf(EXPR_START);
 
+      const edit = new vscode.WorkspaceEdit();
+
       if (currentStartIdx !== -1 && newStartIdx !== -1) {
         // Only replace the header (everything before the start marker)
-        const edit = new vscode.WorkspaceEdit();
         const headerRange = new vscode.Range(doc.positionAt(0), doc.positionAt(currentStartIdx));
         edit.replace(doc.uri, headerRange, newContent.substring(0, newStartIdx));
-        await vscode.workspace.applyEdit(edit);
       } else {
         // Full replacement (first time or file was corrupted)
-        const edit = new vscode.WorkspaceEdit();
         const fullRange = new vscode.Range(
           doc.positionAt(0),
           doc.positionAt(currentContent.length),
         );
         edit.replace(doc.uri, fullRange, newContent);
-        await vscode.workspace.applyEdit(edit);
       }
+
+      await vscode.workspace.applyEdit(edit);
     } else {
       // File not open as document — write to disk
       fs.writeFileSync(tempFilePath, newContent, 'utf8');
     }
 
-    return resolvedFrameId;
+    return frameId;
   } catch (error) {
     console.error('[DebugSharp] Error updating scaffold:', error);
     return undefined;
@@ -187,21 +282,17 @@ export async function updateEvalScaffold(
 /**
  * Delete the temp .cs file when debugging stops
  */
-export function deleteTempFile(): void {
+export function deleteEvalFile(): void {
   if (tempFilePath && fs.existsSync(tempFilePath)) {
-    try {
-      fs.unlinkSync(tempFilePath);
-      tempFilePath = undefined;
-    } catch {
-      // Fail silently
-    }
+    deleteEvalFileAt(tempFilePath);
+    tempFilePath = undefined;
   }
 }
 
 /**
- * Clean up resources: temp file, listeners, and optionally the panel
+ * Clean up resources: close the editor and dispose listeners
  */
-async function cleanup(closePanel: boolean = true): Promise<void> {
+async function cleanup(): Promise<void> {
   // Close input document
   if (inputDocument) {
     const editor = vscode.window.visibleTextEditors.find(
@@ -222,28 +313,17 @@ async function cleanup(closePanel: boolean = true): Promise<void> {
   documentCloseListener?.dispose();
   documentCloseListener = undefined;
 
-  // Close panel if requested
-  if (closePanel && currentPanel) {
-    currentPanel.dispose();
-    currentPanel = undefined;
-  }
-
   currentSession = undefined;
 }
 
 /**
- * Show evaluation panel with C# editor for expression input
- *
- * Creates a temporary .cs file to provide full IntelliSense support,
- * then displays a webview panel for evaluation results.
+ * Open the eval file with the cursor in the expression area.
  *
  * @param session - Active debug session
- * @param frameId - Current stack frame ID
  * @param initialExpression - Optional expression to pre-populate
  */
-export async function showEvaluationPanel(
+export async function openEvalFile(
   session: vscode.DebugSession,
-  frameId: number,
   initialExpression?: string,
 ): Promise<void> {
   currentSession = session;
@@ -295,58 +375,34 @@ export async function showEvaluationPanel(
     return;
   }
 
-  if (currentPanel) {
-    currentPanel.reveal(vscode.ViewColumn.Beside, true);
-  } else {
-    currentPanel = vscode.window.createWebviewPanel(
-      'evaluationPanel',
-      'Expression Evaluator',
-      vscode.ViewColumn.Beside,
-      {
-        enableScripts: true,
-        retainContextWhenHidden: true,
-      },
-    );
-
-    currentPanel.webview.html = getEvaluationPanelHtml();
-
-    currentPanel.onDidDispose(() => {
-      cleanup(true);
+  if (!debugSessionListener) {
+    debugSessionListener = vscode.debug.onDidTerminateDebugSession(terminatedSession => {
+      if (terminatedSession === currentSession) {
+        cleanup();
+      }
     });
-
-    if (!debugSessionListener) {
-      debugSessionListener = vscode.debug.onDidTerminateDebugSession(terminatedSession => {
-        if (terminatedSession === currentSession) {
-          cleanup(false);
-        }
-      });
-    }
-
-    if (!documentCloseListener && inputDocument && tempFilePath) {
-      const tempUri = inputDocument.uri.toString();
-      documentCloseListener = vscode.workspace.onDidCloseTextDocument(closedDoc => {
-        if (closedDoc.uri.toString() === tempUri) {
-          if (tempFilePath && fs.existsSync(tempFilePath)) {
-            setTimeout(() => {
-              try {
-                if (tempFilePath && fs.existsSync(tempFilePath)) {
-                  fs.unlinkSync(tempFilePath);
-                }
-              } catch (err) {
-                console.error('Failed to delete temp file:', err);
-              }
-            }, 100);
-          }
-          if (documentCloseListener) {
-            documentCloseListener.dispose();
-            documentCloseListener = undefined;
-          }
-        }
-      });
-    }
   }
 
-  // Show the text document with focus (after panel is created/revealed)
+  if (!documentCloseListener && inputDocument && tempFilePath) {
+    const tempUri = inputDocument.uri.toString();
+    documentCloseListener = vscode.workspace.onDidCloseTextDocument(closedDoc => {
+      if (closedDoc.uri.toString() === tempUri) {
+        if (tempFilePath && fs.existsSync(tempFilePath)) {
+          setTimeout(() => {
+            if (tempFilePath && fs.existsSync(tempFilePath)) {
+              deleteEvalFileAt(tempFilePath);
+            }
+          }, 100);
+        }
+        if (documentCloseListener) {
+          documentCloseListener.dispose();
+          documentCloseListener = undefined;
+        }
+      }
+    });
+  }
+
+  // Show the text document with focus
   const editor = await vscode.window.showTextDocument(inputDocument, {
     viewColumn: vscode.ViewColumn.One,
     preview: false,
@@ -362,32 +418,4 @@ export async function showEvaluationPanel(
     editor.selection = new vscode.Selection(position, position);
     editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
   }
-}
-
-/**
- * Load and cache the HTML template
- */
-function getEvaluationTemplate(): string {
-  if (!evaluationTemplate) {
-    if (!extensionContext) {
-      throw new Error('Evaluation panel not initialized. Call initializeEvaluationPanel() first.');
-    }
-    const templatePath = path.join(
-      extensionContext.extensionPath,
-      'out',
-      'ui',
-      'panels',
-      'templates',
-      'evaluation.html',
-    );
-    evaluationTemplate = fs.readFileSync(templatePath, 'utf8');
-  }
-  return evaluationTemplate;
-}
-
-/**
- * Generate HTML for the evaluation panel
- */
-function getEvaluationPanelHtml(): string {
-  return getEvaluationTemplate();
 }
