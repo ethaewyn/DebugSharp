@@ -2,7 +2,7 @@
   "name": "debugsharp",
   "displayName": "DebugSharp",
   "description": "Enhanced C# debugging with IntelliSense expression evaluation, builds that skip when nothing changed, Test Explorer, NuGet & project reference management, and Problems panel integration",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "publisher": "Ethaewyn",
   "icon": "icon.png",
   "categories": [
